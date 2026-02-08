@@ -161,15 +161,27 @@ class AggregatedDataClient:
         )
     
     def _update_data(self, data: Dict):
-        """Update latest data from WebSocket."""
+        """Update latest data from WebSocket and display."""
         coin = data['coin'].lower()
         self.latest_data[coin] = data
+        
+        # 实时显示数据
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        price = data['price']
+        change = data['price_change_percent']
+        emoji = "🟢" if change >= 0 else "🔴"
+        symbol = data['symbol'].replace('USDT', '')
+        
+        print(f"[{timestamp}] {symbol:5} ${price:>10,.2f} {emoji} {change:>+6.2f}% | "
+              f"Vol: ${data['quote_volume']/1e6:>6.2f}M | Trades: {data['trades_count']:,}")
     
     def start(self):
         """Start aggregated client."""
         print("🚀 Starting real-time crypto data stream...")
         print(f"Monitoring: {', '.join(self.coins).upper()}")
         print("Press Ctrl+C to stop\n")
+        print(f"{'Time':8} {'Coin':6} {'Price':>12} {'Change':>10} {'Volume':>12} {'Trades':>10}")
+        print("-" * 70)
         self.ws_client.start()
         
         try:
