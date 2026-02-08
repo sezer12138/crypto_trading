@@ -63,30 +63,46 @@ class CryptoDataFetcher:
             'display': {'currency': 'USD'}
         }
     
-    def get_coin_data_coingecko(self, coin: str) -> Optional[Dict]:
-        """Fetch coin data from CoinGecko API."""
-        try:
-            coin_id = self.coin_ids.get(coin.lower(), coin.lower())
-            url = f"{self.coingecko_base}/coins/markets"
-            params = {
-                'vs_currency': self.currency.lower(),
-                'ids': coin_id,
-                'order': 'market_cap_desc',
-                'sparkline': 'false',
-                'price_change_percentage': '1h,24h,7d'
-            }
-            
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data and len(data) > 0:
-                return self._format_coingecko_data(data[0])
-            return None
-            
-        except requests.RequestException as e:
-            logger.error(f"Error fetching {coin} from CoinGecko: {e}")
-            return None
+    def get_coin_data_coingecko(self, coin: str, max_retries: int = 3) -> Optional[Dict]:
+        """Fetch coin data from CoinGecko API with retry logic."""
+        import time
+        
+        coin_id = self.coin_ids.get(coin.lower(), coin.lower())
+        url = f"{self.coingecko_base}/coins/markets"
+        params = {
+            'vs_currency': self.currency.lower(),
+            'ids': coin_id,
+            'order': 'market_cap_desc',
+            'sparkline': 'false',
+            'price_change_percentage': '1h,24h,7d'
+        }
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, params=params, timeout=10)
+                
+                # 处理限流
+                if response.status_code == 429:
+                    wait_time = (attempt + 1) * 2  # 指数退避
+                    logger.warning(f"Rate limited by CoinGecko, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                if data and len(data) > 0:
+                    return self._format_coingecko_data(data[0])
+                return None
+                
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+                logger.error(f"Error fetching {coin} from CoinGecko: {e}")
+                return None
+        
+        return None
     
     def get_coin_data_binance(self, coin: str) -> Optional[Dict]:
         """Fetch coin data from Binance API."""
@@ -144,7 +160,7 @@ class CryptoDataFetcher:
             'timestamp': datetime.now().isoformat()
         }
     
-    def get_all_coins_data(self, source: str = 'coingecko') -> Dict[str, Dict]:
+    def get_all_coins_data(self, source: str = 'binance') -> Dict[str, Dict]:
         """Fetch data for all configured coins."""
         results = {}
         

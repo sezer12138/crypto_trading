@@ -65,16 +65,16 @@ Examples:
     parser.add_argument(
         '--interval',
         type=int,
-        default=30,
-        help='Update interval in seconds (default: 30)'
+        default=60,
+        help='Update interval in seconds (default: 60, min 60 for coingecko)'
     )
     
     parser.add_argument(
         '--source',
         type=str,
-        default='coingecko',
+        default='binance',
         choices=['coingecko', 'binance'],
-        help='Data source to use (default: coingecko)'
+        help='Data source to use (default: binance, recommended)'
     )
     
     parser.add_argument(
@@ -99,6 +99,12 @@ def run_rest_mode(args):
     fetcher = CryptoDataFetcher()
     fetcher.coins = coins
     
+    # CoinGecko 需要更长的间隔
+    if args.source == 'coingecko' and args.interval < 60:
+        print("⚠️  Warning: CoinGecko free API has rate limits (5-15 calls/min)")
+        print("    Increasing interval to 60 seconds...")
+        args.interval = 60
+    
     print(f"🚀 Starting Crypto Trading Data Fetcher")
     print(f"📊 Coins: {', '.join(c.upper() for c in coins)}")
     print(f"⏱️  Interval: {args.interval}s")
@@ -107,10 +113,13 @@ def run_rest_mode(args):
     
     signal.signal(signal.SIGINT, signal_handler)
     
+    consecutive_errors = 0
+    
     while True:
         try:
             data = fetcher.get_all_coins_data(source=args.source)
             fetcher.display_data(data)
+            consecutive_errors = 0  # 重置错误计数
             
             # Save to file if specified
             if args.output:
@@ -119,8 +128,11 @@ def run_rest_mode(args):
             time.sleep(args.interval)
             
         except Exception as e:
-            logger.error(f"Error in main loop: {e}")
-            time.sleep(5)
+            consecutive_errors += 1
+            logger.error(f"Error in main loop ({consecutive_errors}): {e}")
+            # 连续错误时增加等待时间
+            wait_time = min(5 * consecutive_errors, 30)
+            time.sleep(wait_time)
 
 
 def run_websocket_mode(args):
