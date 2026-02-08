@@ -7,6 +7,7 @@ import websocket
 import json
 import threading
 import time
+import ssl
 from datetime import datetime
 from typing import Callable, Dict
 import logging
@@ -29,6 +30,8 @@ class BinanceWebSocketClient:
         self.ws = None
         self.is_running = False
         self.reconnect_interval = 5
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 10
         
         # Symbol mappings
         self.symbols = {
@@ -37,12 +40,15 @@ class BinanceWebSocketClient:
             'sol': 'solusdt'
         }
     
-    def _get_stream_url(self) -> str:
+    def _get_stream_url(self, use_port_443: bool = True) -> str:
         """Generate WebSocket stream URL."""
         streams = "/".join([
             f"{self.symbols[coin.lower()]}@ticker"
             for coin in self.coins
         ])
+        # 使用 443 端口避免防火墙问题
+        if use_port_443:
+            return f"wss://stream.binance.com:443/ws/{streams}"
         return f"wss://stream.binance.com:9443/ws/{streams}"
     
     def _on_message(self, ws, message):
@@ -68,16 +74,21 @@ class BinanceWebSocketClient:
         logger.info(f"WebSocket connection closed: {close_status_code} - {close_msg}")
         self.is_running = False
         
-        # Auto-reconnect
-        if close_status_code != 1000:  # Not a normal closure
-            logger.info(f"Reconnecting in {self.reconnect_interval} seconds...")
-            time.sleep(self.reconnect_interval)
+        # Auto-reconnect with limit
+        if close_status_code != 1000 and self.reconnect_attempts < self.max_reconnect_attempts:
+            self.reconnect_attempts += 1
+            wait_time = min(self.reconnect_interval * self.reconnect_attempts, 60)
+            logger.info(f"Reconnecting in {wait_time} seconds... (attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})")
+            time.sleep(wait_time)
             self.start()
+        elif self.reconnect_attempts >= self.max_reconnect_attempts:
+            logger.error("Max reconnection attempts reached. Please check your network connection.")
     
     def _on_open(self, ws):
         """Handle WebSocket connection open."""
         logger.info("WebSocket connection established")
         self.is_running = True
+        self.reconnect_attempts = 0  # Reset counter on successful connection
     
     def _format_ticker_data(self, data: Dict) -> Dict:
         """Format ticker data from WebSocket."""
@@ -109,16 +120,24 @@ class BinanceWebSocketClient:
         """Start WebSocket connection."""
         websocket.enableTrace(False)
         
+        # Create SSL context that works behind firewalls/proxies
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
         self.ws = websocket.WebSocketApp(
-            self._get_stream_url(),
+            self._get_stream_url(use_port_443=True),
             on_open=self._on_open,
             on_message=self._on_message,
             on_error=self._on_error,
             on_close=self._on_close
         )
         
-        # Run in separate thread
-        self.ws_thread = threading.Thread(target=self.ws.run_forever)
+        # Run in separate thread with SSL context
+        self.ws_thread = threading.Thread(
+            target=self.ws.run_forever,
+            kwargs={"sslopt": {"context": ssl_context}}
+        )
         self.ws_thread.daemon = True
         self.ws_thread.start()
     
