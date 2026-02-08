@@ -10,6 +10,9 @@ from typing import Dict, List, Optional, Tuple
 import logging
 import json
 
+# Ensure log directory exists
+Path("logs").mkdir(parents=True, exist_ok=True)
+
 logger = logging.getLogger(__name__)
 
 

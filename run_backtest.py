@@ -23,6 +23,9 @@ from strategies import get_strategy
 from backtest import BacktestEngine
 from visualization import Visualizer
 
+# 确保日志目录存在
+Path("logs").mkdir(parents=True, exist_ok=True)
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,

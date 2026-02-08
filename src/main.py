@@ -21,11 +21,14 @@ from websocket_client import AggregatedDataClient
 import logging
 
 # Setup logging
+log_dir = Path(__file__).parent.parent / 'logs'
+log_dir.mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('../logs/crypto_fetcher.log'),
+        logging.FileHandler(log_dir / 'crypto_fetcher.log'),
         logging.StreamHandler()
     ]
 )
