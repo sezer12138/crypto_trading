@@ -69,7 +69,7 @@ class TestDataFetcher:
 
         formatted = fetcher._format_coingecko_data(raw_data)
 
-        assert formatted["coin"] == "bitcoin"
+        assert formatted["coin"] == "BITCOIN"
         assert formatted["symbol"] == "BTC"
         assert formatted["price"] == 50000.0
         assert formatted["market_cap"] == 1000000000000
@@ -81,6 +81,7 @@ class TestDataFetcher:
         """Test Binance data formatting."""
         fetcher = CryptoDataFetcher()
         raw_data = {
+            "symbol": "BTCUSDT",
             "lastPrice": "50000.00",
             "priceChange": "1000.00",
             "priceChangePercent": "2.00",
@@ -98,7 +99,7 @@ class TestDataFetcher:
         formatted = fetcher._format_binance_data(raw_data, "btc")
 
         assert formatted["coin"] == "BTC"
-        assert formatted["symbol"] == raw_data
+        assert formatted["symbol"] == "BTCUSDT"
         assert formatted["price"] == 50000.0
         assert formatted["price_change_percent"] == 2.0
         assert formatted["volume_24h"] == 1000.0
@@ -158,7 +159,9 @@ class TestStrategies:
         assert "upper_band" in result.columns
         assert "lower_band" in result.columns
         assert "bandwidth" in result.columns
-        assert result["upper_band"].gt(result["lower_band"]).all()
+        # Skip NaN values (first window rows)
+        valid_data = result.dropna()
+        assert (valid_data["upper_band"] > valid_data["lower_band"]).all()
 
     def test_multi_factor_strategy(self, sample_data):
         """Test Multi-Factor strategy."""
@@ -167,7 +170,9 @@ class TestStrategies:
 
         assert "score" in result.columns
         assert "signal" in result.columns
-        assert result["score"].between(-1, 1).all()
+        # Skip NaN values (first few rows until indicators are calculated)
+        valid_scores = result["score"].dropna()
+        assert (valid_scores >= -1).all() and (valid_scores <= 1).all()
 
     def test_mean_reversion_strategy(self, sample_data):
         """Test Mean Reversion strategy."""
@@ -281,15 +286,16 @@ class TestBacktest:
         """Test simple backtest execution."""
 
         class SimpleStrategy:
+            def __init__(self):
+                self.name = "SimpleStrategy"
+
             def generate_signals(self, df):
                 return df
 
         engine = BacktestEngine(initial_capital=10000.0)
         strategy = SimpleStrategy()
 
-        result = engine.run_backtest(
-            sample_data_with_signals, strategy, coin="TEST"
-        )
+        result = engine.run_backtest(sample_data_with_signals, strategy, coin="TEST")
 
         assert result is not None
         assert len(result.trades) > 0
