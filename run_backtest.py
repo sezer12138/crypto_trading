@@ -73,7 +73,8 @@ Examples:
         '--strategy',
         type=str,
         default='multi_factor',
-        choices=['ma_cross', 'rsi', 'bollinger', 'multi_factor', 'mean_reversion'],
+        choices=['ma_cross', 'rsi', 'bollinger', 'multi_factor', 'mean_reversion',
+                 'macd', 'breakout', 'vwap', 'momentum', 'atr_stop', 'stochastic'],
         help='交易策略 - 默认: multi_factor'
     )
     
@@ -168,7 +169,8 @@ def run_single_backtest(
 
 def compare_strategies(coin: str, days: int, interval: str, capital: float):
     """对比多个策略"""
-    strategies = ['ma_cross', 'rsi', 'bollinger', 'multi_factor', 'mean_reversion']
+    strategies = ['ma_cross', 'rsi', 'bollinger', 'multi_factor', 'mean_reversion',
+                  'macd', 'breakout', 'vwap', 'momentum', 'atr_stop', 'stochastic']
     results = {}
     data_frames = {}
     
