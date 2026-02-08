@@ -1,0 +1,54 @@
+# Crypto Trading Data Fetcher Configuration
+
+# Supported coins: btc, eth, sol
+coins:
+  - btc
+  - eth
+  - sol
+
+# Update interval in seconds
+update_interval: 30
+
+# Data format: csv, json, or both
+output_format: csv
+
+# Data sources (coingecko, binance)
+data_source: coingecko
+
+# Enable WebSocket for real-time updates
+use_websocket: true
+
+# Data storage settings
+storage:
+  raw_data_dir: data/raw
+  processed_data_dir: data/processed
+  max_file_size_mb: 100
+  
+# Logging settings
+logging:
+  level: INFO
+  log_file: logs/crypto_fetcher.log
+  max_log_size_mb: 10
+  backup_count: 5
+
+# Display settings
+display:
+  show_price_change: true
+  show_volume_24h: true
+  show_market_cap: true
+  currency: USD
+  
+# API settings
+api:
+  coingecko:
+    base_url: https://api.coingecko.com/api/v3
+    rate_limit: 1.0  # requests per second
+  
+  binance:
+    base_url: https://api.binance.com/api/v3
+    ws_url: wss://stream.binance.com:9443/ws
+    
+# Alert settings (optional)
+alerts:
+  enabled: false
+  price_change_threshold: 5  # percentage
