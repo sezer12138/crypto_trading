@@ -368,6 +368,52 @@ for short, long in itertools.product([5, 10, 15], [20, 30, 50]):
 print(f"最优参数: short={best_params[0]}, long={best_params[1]}")
 ```
 
+## 🧪 Testing
+
+### Run Unit Tests
+
+```bash
+# Install test dependencies
+pip install pytest pytest-cov
+
+# Run all tests
+pytest tests/ -v
+
+# Run with coverage report
+pytest tests/ --cov=src --cov-report=html
+
+# Run specific test file
+pytest tests/test_crypto_trading.py -v
+
+# Run only fast tests (exclude slow/integration)
+pytest tests/ -v -m "not slow and not integration"
+```
+
+### Code Formatting with Black
+
+```bash
+# Install black
+pip install black
+
+# Format all code
+black src/ tests/
+
+# Check formatting without changes
+black --check src/ tests/
+```
+
+### Test Structure
+
+```
+tests/
+├── __init__.py
+└── test_crypto_trading.py
+    ├── TestDataFetcher      # Tests for data fetching
+    ├── TestStrategies       # Tests for trading strategies
+    ├── TestBacktest         # Tests for backtest engine
+    └── TestIntegration      # Integration tests
+```
+
 ## ⚠️ 风险提示
 
 1. **历史回测不等于未来收益** - 过往表现不代表未来
@@ -383,6 +429,8 @@ numpy        - 数值计算
 requests     - API请求
 matplotlib   - 可视化
 pyyaml       - 配置解析
+pytest       - 测试框架
+black        - 代码格式化
 ```
 
 ## 🤝 贡献

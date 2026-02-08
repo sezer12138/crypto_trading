@@ -37,6 +37,7 @@ env/
 .DS_Store
 
 # Logs
+logs/
 logs/*.log
 logs/*.log.*
 
@@ -45,6 +46,8 @@ data/raw/*.csv
 data/raw/*.json
 data/processed/*.csv
 data/processed/*.json
+data/historical/*.csv
+data/historical/*.json
 
 # Config with sensitive info
 config/.env
@@ -63,6 +66,9 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .tox/
+
+# Results
+results/
 
 # Temporary files
 tmp/
