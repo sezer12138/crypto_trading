@@ -278,6 +278,240 @@ class MeanReversionStrategy(TradingStrategy):
         return df
 
 
+class MACDStrategy(TradingStrategy):
+    """
+    MACD趋势策略 (中频)
+    MACD线上穿信号线买入，下穿卖出
+    """
+
+    def __init__(self, fast: int = 12, slow: int = 26, signal: int = 9):
+        super().__init__("MACD_Strategy")
+        self.fast = fast
+        self.slow = slow
+        self.signal = signal
+
+    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["ema_fast"] = df["close"].ewm(span=self.fast, adjust=False).mean()
+        df["ema_slow"] = df["close"].ewm(span=self.slow, adjust=False).mean()
+        df["macd"] = df["ema_fast"] - df["ema_slow"]
+        df["macd_signal"] = df["macd"].ewm(span=self.signal, adjust=False).mean()
+        df["macd_hist"] = df["macd"] - df["macd_signal"]
+        return df
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self.calculate_indicators(df)
+        df["signal"] = 0
+
+        # MACD上穿信号线买入
+        df.loc[
+            (df["macd"] > df["macd_signal"]) & (df["macd"].shift(1) <= df["macd_signal"].shift(1)),
+            "signal",
+        ] = 1
+
+        # MACD下穿信号线卖出
+        df.loc[
+            (df["macd"] < df["macd_signal"]) & (df["macd"].shift(1) >= df["macd_signal"].shift(1)),
+            "signal",
+        ] = -1
+
+        df["position"] = df["signal"].replace(to_replace=0, method="ffill")
+        return df
+
+
+class BreakoutStrategy(TradingStrategy):
+    """
+    突破策略 (高频)
+    价格突破N周期高点买入，突破N周期低点卖出
+    """
+
+    def __init__(self, window: int = 20, confirmation: bool = True):
+        super().__init__("Breakout_Strategy")
+        self.window = window
+        self.confirmation = confirmation
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["high_n"] = df["high"].rolling(window=self.window).max()
+        df["low_n"] = df["low"].rolling(window=self.window).min()
+        df["signal"] = 0
+
+        if self.confirmation:
+            # 需要收盘价确认突破
+            df.loc[
+                (df["close"] > df["high_n"].shift(1)) &
+                (df["close"].shift(1) <= df["high_n"].shift(2)),
+                "signal",
+            ] = 1
+            df.loc[
+                (df["close"] < df["low_n"].shift(1)) &
+                (df["close"].shift(1) >= df["low_n"].shift(2)),
+                "signal",
+            ] = -1
+        else:
+            # 即时突破
+            df.loc[df["high"] > df["high_n"].shift(1), "signal"] = 1
+            df.loc[df["low"] < df["low_n"].shift(1), "signal"] = -1
+
+        df["position"] = df["signal"].replace(to_replace=0, method="ffill")
+        return df
+
+
+class VWAPStrategy(TradingStrategy):
+    """
+    VWAP均值回归策略 (高频)
+    价格低于VWAP买入，高于VWAP卖出
+    """
+
+    def __init__(self, window: int = 20, deviation: float = 0.01):
+        super().__init__("VWAP_Strategy")
+        self.window = window
+        self.deviation = deviation
+
+    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        typical_price = (df["high"] + df["low"] + df["close"]) / 3
+        df["vwap"] = (typical_price * df["volume"]).rolling(window=self.window).sum() / \
+                     df["volume"].rolling(window=self.window).sum()
+        df["vwap_dev"] = (df["close"] - df["vwap"]) / df["vwap"]
+        return df
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self.calculate_indicators(df)
+        df["signal"] = 0
+
+        # 价格低于VWAP一定幅度买入
+        df.loc[df["vwap_dev"] < -self.deviation, "signal"] = 1
+        # 价格高于VWAP一定幅度卖出
+        df.loc[df["vwap_dev"] > self.deviation, "signal"] = -1
+
+        df["position"] = df["signal"].replace(to_replace=0, method="ffill")
+        return df
+
+
+class MomentumStrategy(TradingStrategy):
+    """
+    动量策略 (中频)
+    基于价格变化率(ROC)和动量指标
+    """
+
+    def __init__(self, roc_period: int = 10, momentum_period: int = 14, threshold: float = 0.02):
+        super().__init__("Momentum_Strategy")
+        self.roc_period = roc_period
+        self.momentum_period = momentum_period
+        self.threshold = threshold
+
+    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        # 变化率
+        df["roc"] = (df["close"] - df["close"].shift(self.roc_period)) / df["close"].shift(self.roc_period)
+        # 动量指标
+        df["momentum"] = df["close"] - df["close"].shift(self.momentum_period)
+        df["momentum_norm"] = df["momentum"] / df["close"] * 100
+        return df
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self.calculate_indicators(df)
+        df["signal"] = 0
+
+        # ROC转正且动量为正买入
+        df.loc[
+            (df["roc"] > self.threshold) & (df["momentum_norm"] > 0) &
+            (df["roc"].shift(1) <= self.threshold),
+            "signal",
+        ] = 1
+
+        # ROC转负且动量为负卖出
+        df.loc[
+            (df["roc"] < -self.threshold) & (df["momentum_norm"] < 0) &
+            (df["roc"].shift(1) >= -self.threshold),
+            "signal",
+        ] = -1
+
+        df["position"] = df["signal"].replace(to_replace=0, method="ffill")
+        return df
+
+
+class ATRStopLossStrategy(TradingStrategy):
+    """
+    ATR动态止损策略 (高频)
+    基于ATR的动态止损和止盈
+    """
+
+    def __init__(self, atr_period: int = 14, multiplier: float = 2.0, trend_ma: int = 50):
+        super().__init__("ATR_StopLoss_Strategy")
+        self.atr_period = atr_period
+        self.multiplier = multiplier
+        self.trend_ma = trend_ma
+
+    def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
+        high_low = df["high"] - df["low"]
+        high_close = abs(df["high"] - df["close"].shift(1))
+        low_close = abs(df["low"] - df["close"].shift(1))
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        return tr.rolling(window=self.atr_period).mean()
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["atr"] = self.calculate_atr(df)
+        df["trend_ma"] = df["close"].rolling(window=self.trend_ma).mean()
+        df["signal"] = 0
+
+        # 趋势判断
+        uptrend = df["close"] > df["trend_ma"]
+        downtrend = df["close"] < df["trend_ma"]
+
+        # 上升趋势中，回调到ATR支撑位买入
+        support = df["close"] - df["atr"] * self.multiplier
+        resistance = df["close"] + df["atr"] * self.multiplier
+
+        df.loc[uptrend & (df["low"] < support.shift(1)) & (df["close"] > support.shift(1)), "signal"] = 1
+        df.loc[downtrend & (df["high"] > resistance.shift(1)) & (df["close"] < resistance.shift(1)), "signal"] = -1
+
+        df["position"] = df["signal"].replace(to_replace=0, method="ffill")
+        return df
+
+
+class StochasticStrategy(TradingStrategy):
+    """
+    随机指标策略 (中高频)
+    K线上穿D线且低于20买入，K线下穿D线且高于80卖出
+    """
+
+    def __init__(self, k_period: int = 14, d_period: int = 3, smooth: int = 3):
+        super().__init__("Stochastic_Strategy")
+        self.k_period = k_period
+        self.d_period = d_period
+        self.smooth = smooth
+
+    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        lowest_low = df["low"].rolling(window=self.k_period).min()
+        highest_high = df["high"].rolling(window=self.k_period).max()
+        df["k"] = 100 * (df["close"] - lowest_low) / (highest_high - lowest_low)
+        df["d"] = df["k"].rolling(window=self.d_period).mean()
+        return df
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self.calculate_indicators(df)
+        df["signal"] = 0
+
+        # K上穿D且在超卖区买入
+        df.loc[
+            (df["k"] > df["d"]) & (df["k"].shift(1) <= df["d"].shift(1)) & (df["k"] < 20),
+            "signal",
+        ] = 1
+
+        # K下穿D且在超买区卖出
+        df.loc[
+            (df["k"] < df["d"]) & (df["k"].shift(1) >= df["d"].shift(1)) & (df["k"] > 80),
+            "signal",
+        ] = -1
+
+        df["position"] = df["signal"].replace(to_replace=0, method="ffill")
+        return df
+
+
 def get_strategy(name: str, **kwargs) -> TradingStrategy:
     """策略工厂函数"""
     strategies = {
@@ -286,6 +520,12 @@ def get_strategy(name: str, **kwargs) -> TradingStrategy:
         "bollinger": BollingerBandsStrategy,
         "multi_factor": MultiFactorStrategy,
         "mean_reversion": MeanReversionStrategy,
+        "macd": MACDStrategy,
+        "breakout": BreakoutStrategy,
+        "vwap": VWAPStrategy,
+        "momentum": MomentumStrategy,
+        "atr_stop": ATRStopLossStrategy,
+        "stochastic": StochasticStrategy,
     }
 
     if name not in strategies:
