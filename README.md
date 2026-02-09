@@ -208,21 +208,32 @@ result.save_logs('logs/backtest_decisions.json')
 
 ### 4. 可视化模块 (`src/visualization.py`)
 
-**功能：** 生成收益曲线、交易信号图、月度收益热力图
+**功能：** 生成专业的收益曲线、交易信号、月度收益热力图和多策略对比
 
 **图表类型：**
-1. **权益曲线图** - 展示资金变化和回撤
-2. **价格信号图** - 标记买卖点和技术指标
-3. **月度收益热力图** - 各月份收益表现
-4. **策略对比图** - 多策略绩效比较
+
+| 图表 | 说明 | 文件名 |
+|------|------|--------|
+| **权益曲线图** | 资金变化、累计收益、回撤分析 | `*_equity.png` |
+| **价格信号图** | 价格走势、买卖信号、成交量 | `*_signals.png` |
+| **月度收益热力图** | 各月收益表现可视化 | `*_monthly.png` |
+| **策略对比-核心指标** | 2×3 布局展示6大核心指标 | `comparison_metrics_*.png` |
+| **策略排名** | 按夏普比率排序的水平条形图 | `comparison_ranking_*.png` |
+| **权益曲线对比** | Top 5 策略的权益曲线对比 | `comparison_equity_*.png` |
+
+**改进亮点（解决11策略拥挤问题）：**
+
+1. **核心指标对比图** - 使用 2×3 子图布局，每个指标独立展示，避免柱状图拥挤
+2. **策略排名图** - 水平条形图展示所有策略排名，更清晰易读
+3. **权益曲线对比** - 只展示 Top 5 策略的权益曲线，避免线条重叠
 
 **使用方式：**
 ```python
 from visualization import Visualizer
 
-viz = Visualizer()
+viz = Visualizer(style='seaborn-v0_8-darkgrid')
 
-# 生成完整报告
+# 生成单次回测报告
 viz.create_full_report(
     result=result,
     df=df,
@@ -231,11 +242,32 @@ viz.create_full_report(
     output_dir='results'
 )
 
-# 生成文件：
-# - results/Multi_Factor_BTC_equity.png
-# - results/Multi_Factor_BTC_signals.png
-# - results/Multi_Factor_BTC_monthly.png
+# 生成策略对比报告（针对多策略对比优化）
+results = {
+    'ma_cross': result1,
+    'rsi': result2,
+    'multi_factor': result3,
+    # ... 更多策略
+}
+viz.create_comparison_report(results, coin='BTC', output_dir='results')
+
+# 单独使用各个图表函数
+viz.plot_equity_curve(result, title='My Strategy', save_path='equity.png')
+viz.plot_metrics_comparison(results, save_path='metrics.png')
+viz.plot_strategy_ranking(results, metric='sharpe_ratio', save_path='ranking.png')
+viz.plot_equity_comparison(results, top_n=5, save_path='equity_comp.png')
 ```
+
+**可视化参数说明：**
+
+```python
+Visualizer(
+    style='seaborn-v0_8',  # Matplotlib 样式
+    fig_dpi=300            # 图表分辨率
+)
+```
+
+支持的样式：`'seaborn-v0_8'`, `'seaborn-v0_8-darkgrid'`, `'ggplot'`, `'bmh'` 等
 
 ## 🚀 快速开始
 
@@ -404,7 +436,7 @@ for short, long in itertools.product([5, 10, 15], [20, 30, 50]):
 print(f"最优参数: short={best_params[0]}, long={best_params[1]}")
 ```
 
-## 🧪 Testing
+## 🧪 Testing & Code Quality
 
 ### Run Unit Tests
 
@@ -425,29 +457,90 @@ pytest tests/test_crypto_trading.py -v
 pytest tests/ -v -m "not slow and not integration"
 ```
 
-### Code Formatting with Black
+### Code Quality Standards
+
+本项目遵循以下代码质量标准：
+
+#### 1. 类型提示 (Type Hints)
+所有函数都包含完整的类型注解：
+```python
+def run_backtest(
+    self, 
+    df: pd.DataFrame, 
+    strategy: object, 
+    coin: str = "BTC"
+) -> BacktestResult:
+    ...
+```
+
+#### 2. 文档字符串 (Docstrings)
+使用 Google 风格的文档字符串：
+```python
+def calculate_metrics(self) -> Dict[str, float]:
+    """
+    计算回测绩效指标
+    
+    计算的指标包括：
+    - total_return_pct: 总收益率 (%)
+    - sharpe_ratio: 夏普比率
+    - max_drawdown_pct: 最大回撤 (%)
+    
+    Returns:
+        包含各项指标的字典
+        
+    Example:
+        >>> result.calculate_metrics()
+        {'total_return_pct': 156.5, 'sharpe_ratio': 1.85}
+    """
+```
+
+#### 3. 代码格式化 (Black)
 
 ```bash
 # Install black
 pip install black
 
-# Format all code
-black src/ tests/
+# Format all code (line length 100)
+black src/ tests/ --line-length 100
 
 # Check formatting without changes
-black --check src/ tests/
+black --check src/ tests/ --line-length 100
 ```
 
-### Test Structure
+#### 4. 代码结构
 
 ```
+src/
+├── __init__.py
+├── backtest.py          # 回测引擎 (BacktestEngine, BacktestResult)
+├── strategies.py        # 交易策略集合
+├── visualization.py     # 可视化模块
+├── data_fetcher.py      # 实时数据获取
+├── historical_data.py   # 历史数据获取
+├── websocket_client.py  # WebSocket 客户端
+└── utils.py            # 工具函数
+
 tests/
 ├── __init__.py
 └── test_crypto_trading.py
-    ├── TestDataFetcher      # Tests for data fetching
-    ├── TestStrategies       # Tests for trading strategies
-    ├── TestBacktest         # Tests for backtest engine
-    └── TestIntegration      # Integration tests
+    ├── TestDataFetcher      # 数据获取测试
+    ├── TestStrategies       # 策略测试
+    ├── TestBacktest         # 回测引擎测试
+    └── TestIntegration      # 集成测试
+```
+
+#### 5. 日志规范
+
+使用分级日志系统：
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+logger.info("🚀 回测引擎初始化")      # 关键流程
+logger.debug("买入 @ $50000")         # 详细信息
+logger.warning("数据可能缺失")        # 警告
+logger.error("无法获取数据")          # 错误
 ```
 
 ## ⚠️ 风险提示
