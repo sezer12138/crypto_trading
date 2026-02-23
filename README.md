@@ -135,6 +135,22 @@ results = fetcher.get_all_coins_historical(
 - **逻辑：** K线上穿D线且低于20买入，K线下穿D线且高于80卖出
 - **参数：** k_period=14, d_period=3
 
+#### 2.12 网格交易策略 (GridStrategy)
+- **类型：** 中高频震荡市策略
+- **逻辑：** 在预设价格区间内，每隔一定间距挂单买入和卖出
+- **适用市场：** 震荡行情
+- **参数：** lower_price, upper_price, grid_num, amount_per_grid
+- **风险提示：** 单边行情可能穿网亏损
+- **使用：** `python run_backtest.py --strategy grid`
+
+#### 2.13 马丁格尔策略 (MartingaleStrategy) ⚠️ 高风险
+- **类型：** 高风险博弈策略
+- **逻辑：** 亏损后加倍下注，直到获利后回到初始下注额
+- **适用场景：** 极小资金测试，不适合实盘
+- **参数：** base_amount, multiplier, max_steps, target_profit, stop_loss
+- **风险提示：** 需要充足资金，连续亏损可能爆仓
+- **使用：** `python run_backtest.py --strategy martingale`
+
 **使用方式：**
 ```python
 from strategies import get_strategy
@@ -390,7 +406,7 @@ parser.add_argument(
 ## 📝 项目做了什么？
 
 1. **数据层：** 从 Binance 获取高质量的2年历史K线数据
-2. **策略层：** 实现了11种经典中高频策略，包含趋势跟踪和均值回归
+2. **策略层：** 实现了13种经典中高频策略，包含趋势跟踪、均值回归、网格交易和马丁格尔
 3. **回测层：** 完整的交易模拟，考虑手续费、滑点、仓位管理
 4. **记录层：** 详细记录每一步决策，便于分析和优化
 5. **可视化层：** 专业的收益曲线、回撤分析、策略对比

@@ -107,6 +107,8 @@ Examples:
             "momentum",
             "atr_stop",
             "stochastic",
+            "grid",
+            "martingale",
         ],
         help="交易策略 - 默认: multi_factor",
     )
@@ -189,7 +191,16 @@ def run_single_backtest(
         return None, None
 
     # 2. 创建策略
-    strategy = get_strategy(strategy_name)
+    if strategy_name == "grid":
+        # 网格策略参数：从数据中自动计算网格范围
+        lower_price = df['low'].min()
+        upper_price = df['high'].max()
+        strategy = get_strategy(strategy_name, lower_price=lower_price, upper_price=upper_price)
+    elif strategy_name == "martingale":
+        # 马丁格尔策略参数
+        strategy = get_strategy(strategy_name, base_amount=0.001, multiplier=2.0, max_steps=5)
+    else:
+        strategy = get_strategy(strategy_name)
 
     # 3. 运行回测
     engine = BacktestEngine(initial_capital=capital)
@@ -247,6 +258,8 @@ def compare_strategies(
         "momentum",
         "atr_stop",
         "stochastic",
+        "grid",
+        "martingale",
     ]
     
     results: Dict[str, BacktestResult] = {}

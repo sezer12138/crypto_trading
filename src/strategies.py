@@ -512,6 +512,133 @@ class StochasticStrategy(TradingStrategy):
         return df
 
 
+class GridStrategy(TradingStrategy):
+    """
+    网格交易策略 (Grid Trading)
+    在预设的价格区间内，每隔一定间距挂单买入和卖出。
+    适合震荡行情。
+    """
+
+    def __init__(
+        self,
+        lower_price: float,
+        upper_price: float,
+        grid_num: int = 10,
+        amount_per_grid: float = 0.01,
+    ):
+        super().__init__("Grid_Strategy")
+        self.lower_price = lower_price
+        self.upper_price = upper_price
+        self.grid_num = grid_num
+        self.amount_per_grid = amount_per_grid
+
+        # 计算网格价格
+        self.grid_prices = np.linspace(lower_price, upper_price, grid_num)
+        self.buy_grids = [False] * grid_num
+        self.sell_grids = [False] * grid_num
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        生成信号：
+        当价格下跌触及网格线时，发出买入信号 (1)
+        当价格上涨触及网格线时，发出卖出信号 (-1)
+        """
+        df = df.copy()
+        df["signal"] = 0
+        df["position"] = 0.0
+
+        current_position = 0.0
+        last_price = df["close"].iloc[0]
+
+        for i in range(1, len(df)):
+            current_price = df["close"].iloc[i]
+
+            # 检查是否穿过任何网格线
+            for price in self.grid_prices:
+                # 价格跌破网格线 - 买入
+                if last_price > price and current_price <= price:
+                    df.loc[df.index[i], "signal"] = 1
+                    current_position += self.amount_per_grid
+                # 价格突破网格线 - 卖出
+                elif last_price < price and current_price >= price:
+                    df.loc[df.index[i], "signal"] = -1
+                    current_position = max(0, current_position - self.amount_per_grid)
+
+            df.loc[df.index[i], "position"] = current_position
+            last_price = current_price
+
+        return df
+
+
+class MartingaleStrategy(TradingStrategy):
+    """
+    马丁格尔策略 (Martingale Strategy)
+    亏损后加倍下单，直到获利。
+    属于高风险博弈策略。
+    """
+
+    def __init__(
+        self,
+        base_amount: float = 0.001,
+        multiplier: float = 2.0,
+        max_steps: int = 5,
+        target_profit: float = 0.01,
+        stop_loss: float = 0.05,
+    ):
+        super().__init__("Martingale_Strategy")
+        self.base_amount = base_amount
+        self.multiplier = multiplier
+        self.max_steps = max_steps
+        self.target_profit = target_profit
+        self.stop_loss = stop_loss
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["signal"] = 0
+        df["position"] = 0.0
+
+        current_step = 0
+        entry_price = 0.0
+        in_position = False
+
+        for i in range(1, len(df)):
+            current_price = df["close"].iloc[i]
+
+            if not in_position:
+                # 初始买入
+                df.loc[df.index[i], "signal"] = 1
+                entry_price = current_price
+                current_step = 0
+                in_position = True
+            else:
+                price_change = (current_price - entry_price) / entry_price
+
+                # 达到目标止盈
+                if price_change >= self.target_profit:
+                    df.loc[df.index[i], "signal"] = -1
+                    in_position = False
+                    current_step = 0
+                # 亏损加倍
+                elif price_change <= -self.stop_loss / (current_step + 1):
+                    if current_step < self.max_steps:
+                        df.loc[df.index[i], "signal"] = 1
+                        current_step += 1
+                        # 更新平均进场价 (简化逻辑: 假设权重加倍)
+                        total_weight = sum([self.multiplier**j for j in range(current_step + 1)])
+                        last_weight = self.multiplier**current_step
+                        entry_price = (entry_price * (total_weight - last_weight) + current_price * last_weight) / total_weight
+                    else:
+                        # 超过最大加倍次数，止损离场
+                        df.loc[df.index[i], "signal"] = -1
+                        in_position = False
+                        current_step = 0
+
+            # 简化 position 记录：记录当前步数作为强度
+            df.loc[df.index[i], "position"] = (current_step + 1) if in_position else 0
+
+        return df
+
+
 def get_strategy(name: str, **kwargs) -> TradingStrategy:
     """策略工厂函数"""
     strategies = {
@@ -526,6 +653,8 @@ def get_strategy(name: str, **kwargs) -> TradingStrategy:
         "momentum": MomentumStrategy,
         "atr_stop": ATRStopLossStrategy,
         "stochastic": StochasticStrategy,
+        "grid": GridStrategy,
+        "martingale": MartingaleStrategy,
     }
 
     if name not in strategies:
