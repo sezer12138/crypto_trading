@@ -287,7 +287,7 @@ class Visualizer:
         
         # 计算月度收益
         monthly_returns = (
-            result.daily_returns.resample("M").apply(lambda x: (1 + x).prod() - 1) * 100
+            result.daily_returns.resample("ME").apply(lambda x: (1 + x).prod() - 1) * 100
         )
         
         monthly_df = pd.DataFrame({
@@ -313,10 +313,10 @@ class Visualizer:
         ax.set_xticks(range(len(pivot_table.columns)))
         ax.set_xticklabels(pivot_table.columns)
         ax.set_yticks(range(len(pivot_table.index)))
-        ax.set_yticklabels([
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-        ])
+        month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        # 只使用实际存在的月份标签
+        ax.set_yticklabels([month_labels[i-1] for i in pivot_table.index])
         
         # 在每个单元格添加数值
         for i in range(len(pivot_table.index)):
