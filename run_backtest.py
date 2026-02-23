@@ -190,6 +190,23 @@ def run_single_backtest(
         logger.error(f"❌ 无法获取 {coin} 数据")
         return None, None
 
+    # 1.1 验证数据完整性
+    interval_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+    minutes = interval_minutes.get(interval, 60)
+    expected_records = int((days * 24 * 60) / minutes)
+    actual_records = len(df)
+    data_ratio = actual_records / expected_records
+
+    logger.info(f"📊 数据完整性: {actual_records}/{expected_records} ({data_ratio*100:.1f}%)")
+
+    if data_ratio < 0.5:
+        logger.error(f"❌ 数据严重不完整 (仅 {data_ratio*100:.1f}%)，停止回测")
+        logger.error(f"   建议: 检查网络连接或稍后重试")
+        return None, None
+    elif data_ratio < 0.8:
+        logger.warning(f"⚠️  数据不完整 ({data_ratio*100:.1f}%)，回测结果可能不准确")
+        logger.warning(f"   建议: 重新运行以获取完整数据")
+
     # 2. 创建策略
     if strategy_name == "grid":
         # 网格策略参数：从数据中自动计算网格范围
