@@ -20,10 +20,25 @@ crypto_trading/
 │   ├── data_fetcher.py         # 实时数据获取
 │   ├── websocket_client.py     # WebSocket 实时流
 │   ├── historical_data.py      # 历史数据获取 ⭐
-│   ├── strategies.py           # 交易策略集合 ⭐
+│   ├── strategies/             # 交易策略包 ⭐
+│   │   ├── __init__.py         # 工厂函数 get_strategy()
+│   │   ├── _base.py            # TradingStrategy 基类
+│   │   ├── _helpers.py         # 共享辅助函数
+│   │   ├── constants.py        # 策略常量定义
+│   │   ├── ma_cross.py         # 双均线策略
+│   │   ├── rsi.py              # RSI策略
+│   │   ├── ...                 # 其他11个策略模块
 │   ├── backtest.py             # 回测引擎 ⭐
 │   ├── utils.py                # 工具函数
-│   └── visualization.py        # 可视化模块 ⭐
+│   └── visualization/          # 可视化包 ⭐
+│       ├── __init__.py         # Visualizer 类组合
+│       ├── _base.py            # 基类和辅助函数
+│       ├── _constants.py       # 可视化常量
+│       ├── equity.py           # 权益曲线
+│       ├── price_signals.py    # 价格信号图
+│       ├── monthly.py          # 月度收益热力图
+│       ├── comparison.py       # 策略对比图
+│       └── report.py           # 报告生成
 │
 ├── data/                        # 数据目录
 │   ├── raw/                    # 原始数据
@@ -72,7 +87,7 @@ results = fetcher.get_all_coins_historical(
 )
 ```
 
-### 2. 交易策略 (`src/strategies.py`)
+### 2. 交易策略 (`src/strategies/` package)
 
 **已实现策略：**
 
@@ -222,7 +237,7 @@ result.save_logs('logs/backtest_decisions.json')
 }
 ```
 
-### 4. 可视化模块 (`src/visualization.py`)
+### 4. 可视化模块 (`src/visualization/` package)
 
 **功能：** 生成专业的收益曲线、交易信号、月度收益热力图和多策略对比
 
@@ -376,18 +391,28 @@ stochastic        82.50%       41.25%       1.10      -29.50%    54.60%      267
 
 ### 修改策略参数
 
-编辑 `src/strategies.py` 中的策略类：
+编辑 `src/strategies/constants.py` 中的策略参数常量：
 
 ```python
-class MultiFactorStrategy(TradingStrategy):
-    def __init__(
-        self,
-        ma_short: int = 5,           # 短期均线
-        ma_long: int = 20,           # 长期均线
-        rsi_period: int = 14,        # RSI周期
-        volume_threshold: float = 1.5 # 成交量倍数
-    ):
-        ...
+# src/strategies/constants.py
+DEFAULT_MA_SHORT = 10       # 短期均线
+DEFAULT_MA_LONG = 30        # 长期均线
+DEFAULT_RSI_PERIOD = 14     # RSI周期
+DEFAULT_RSI_OVERSOLD = 30   # RSI超卖阈值
+DEFAULT_RSI_OVERBOUGHT = 70 # RSI超买阈值
+```
+
+或在创建策略实例时自定义参数：
+
+```python
+from strategies import MultiFactorStrategy
+
+strategy = MultiFactorStrategy(
+    ma_short=5,
+    ma_long=20,
+    rsi_period=14,
+    volume_threshold=1.5
+)
 ```
 
 ### 修改回测参数
@@ -421,7 +446,7 @@ from strategies import TradingStrategy
 class MyStrategy(TradingStrategy):
     def __init__(self):
         super().__init__("My_Custom_Strategy")
-    
+
     def generate_signals(self, df):
         df = df.copy()
         # 你的交易逻辑
@@ -431,6 +456,19 @@ class MyStrategy(TradingStrategy):
 # 使用
 strategy = MyStrategy()
 result = engine.run_backtest(df, strategy, coin='BTC')
+```
+
+**添加新策略到工厂函数：**
+
+在 `src/strategies/__init__.py` 的 `get_strategy()` 函数中注册：
+
+```python
+def get_strategy(name: str, **kwargs) -> TradingStrategy:
+    strategies = {
+        "my_strategy": MyStrategy,
+        # ... 其他策略
+    }
+    return strategies[name](**kwargs)
 ```
 
 ### 批量优化参数
@@ -529,12 +567,21 @@ black --check src/ tests/ --line-length 100
 src/
 ├── __init__.py
 ├── backtest.py          # 回测引擎 (BacktestEngine, BacktestResult)
-├── strategies.py        # 交易策略集合
-├── visualization.py     # 可视化模块
+├── strategies/          # 交易策略包
+│   ├── __init__.py      # get_strategy() 工厂函数
+│   ├── _base.py         # TradingStrategy 基类
+│   ├── _helpers.py      # 共享辅助函数
+│   ├── constants.py     # 策略常量
+│   └── *.py             # 各策略模块
+├── visualization/       # 可视化包
+│   ├── __init__.py      # Visualizer 类组合
+│   ├── _base.py         # 基类
+│   ├── _constants.py    # 可视化常量
+│   └── *.py             # 各绘图 Mixin 模块
 ├── data_fetcher.py      # 实时数据获取
 ├── historical_data.py   # 历史数据获取
 ├── websocket_client.py  # WebSocket 客户端
-└── utils.py            # 工具函数
+└── utils.py             # 工具函数
 
 tests/
 ├── __init__.py

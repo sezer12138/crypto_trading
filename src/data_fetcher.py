@@ -56,8 +56,6 @@ class CryptoDataFetcher:
 
     def get_coin_data_coingecko(self, coin: str, max_retries: int = 3) -> Optional[Dict]:
         """Fetch coin data from CoinGecko API with retry logic."""
-        import time
-
         coin_id = self.coin_ids.get(coin.lower(), coin.lower())
         url = f"{self.coingecko_base}/coins/markets"
         params = {

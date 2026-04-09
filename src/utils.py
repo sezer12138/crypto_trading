@@ -158,7 +158,19 @@ class DataCache:
 
     def set(self, key: str, value, ttl: int = 60):
         """Set cache value with TTL (seconds)."""
+        if len(self.cache) >= self.max_size:
+            self._evict()
         self.cache[key] = {"value": value, "expires": datetime.now().timestamp() + ttl}
+
+    def _evict(self):
+        """淘汰缓存条目：优先移除已过期的，否则移除最早到期的。"""
+        now = datetime.now().timestamp()
+        expired_keys = [k for k, v in self.cache.items() if v["expires"] <= now]
+        for k in expired_keys:
+            del self.cache[k]
+        if len(self.cache) >= self.max_size:
+            oldest_key = min(self.cache, key=lambda k: self.cache[k]["expires"])
+            del self.cache[oldest_key]
 
     def get(self, key: str):
         """Get cached value if not expired."""
