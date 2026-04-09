@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class CryptoDataFetcher:
     """Main class for fetching cryptocurrency data."""
 
-    def __init__(self, config_path: str = "config/settings.yaml"):
+    def __init__(self, config_path: str = "config/settings.yaml", verify_ssl: bool = True):
         """Initialize the data fetcher with configuration."""
         self.config = self._load_config(config_path)
         self.coins = self.config.get("coins", ["btc", "eth", "sol"])
@@ -36,6 +36,14 @@ class CryptoDataFetcher:
         self.coin_ids = {"btc": "bitcoin", "eth": "ethereum", "sol": "solana"}
 
         self.symbols = {"btc": "BTCUSDT", "eth": "ETHUSDT", "sol": "SOLUSDT"}
+
+        # SSL验证 (VPN/代理环境下可能需要关闭)
+        self.verify_ssl = verify_ssl
+
+        if not verify_ssl:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            logger.warning("⚠️  SSL验证已禁用，请确保网络环境安全")
 
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -68,7 +76,7 @@ class CryptoDataFetcher:
 
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, params=params, timeout=10)
+                response = requests.get(url, params=params, timeout=10, verify=self.verify_ssl)
 
                 # 处理限流
                 if response.status_code == 429:
@@ -100,7 +108,7 @@ class CryptoDataFetcher:
             url = f"{self.binance_base}/ticker/24hr"
             params = {"symbol": symbol}
 
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, timeout=10, verify=self.verify_ssl)
             response.raise_for_status()
             data = response.json()
 

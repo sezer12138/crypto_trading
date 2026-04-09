@@ -282,7 +282,7 @@ def compare_strategies(
     results: Dict[str, BacktestResult] = {}
     data_frames: Dict[str, pd.DataFrame] = {}
 
-    fetcher = HistoricalDataFetcher()
+    fetcher = HistoricalDataFetcher(verify_ssl=False)
 
     logger.info(f"\n{'=' * 60}")
     logger.info(f"📊 策略对比 | 币种: {coin.upper()}")
@@ -375,7 +375,7 @@ def main() -> None:
     elif args.coin == "all":
         # 回测所有币种
         coins = ["btc", "eth", "sol"]
-        fetcher = HistoricalDataFetcher()
+        fetcher = HistoricalDataFetcher(verify_ssl=False)
 
         for coin in coins:
             result, df = run_single_backtest(
@@ -394,7 +394,7 @@ def main() -> None:
                 )
     else:
         # 单次回测模式
-        fetcher = HistoricalDataFetcher()
+        fetcher = HistoricalDataFetcher(verify_ssl=False)
         result, df = run_single_backtest(
             args.coin,
             args.strategy,

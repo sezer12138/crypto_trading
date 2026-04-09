@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class HistoricalDataFetcher:
     """获取加密货币历史K线数据"""
 
-    def __init__(self, max_retries: int = 3, retry_delay: float = 2.0):
+    def __init__(self, max_retries: int = 3, retry_delay: float = 2.0, verify_ssl: bool = True):
         self.binance_base = "https://api.binance.com/api/v3"
         self.coingecko_base = "https://api.coingecko.com/api/v3"
 
@@ -37,6 +37,13 @@ class HistoricalDataFetcher:
         # 重试配置
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        # SSL验证 (VPN/代理环境下可能需要关闭)
+        self.verify_ssl = verify_ssl
+
+        if not verify_ssl:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            logger.warning("⚠️  SSL验证已禁用，请确保网络环境安全")
 
     def fetch_binance_klines(
         self,
@@ -71,7 +78,7 @@ class HistoricalDataFetcher:
         # 重试机制
         for attempt in range(self.max_retries):
             try:
-                response = requests.get(url, params=params, timeout=30)
+                response = requests.get(url, params=params, timeout=30, verify=self.verify_ssl)
                 response.raise_for_status()
                 data = response.json()
 
