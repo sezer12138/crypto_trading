@@ -44,6 +44,7 @@ from historical_data import HistoricalDataFetcher
 from strategies import get_strategy
 from backtest import BacktestEngine, BacktestResult
 from visualization import Visualizer
+from visualization.html_report import HTMLReportGenerator
 
 # 确保日志目录存在
 Path("logs").mkdir(parents=True, exist_ok=True)
@@ -157,10 +158,11 @@ def run_single_backtest(
     interval: str,
     capital: float,
     fetcher: HistoricalDataFetcher,
+    generate_html: bool = True,
 ) -> Tuple[Optional[BacktestResult], Optional[pd.DataFrame]]:
     """
     运行单次回测
-    
+
     Args:
         coin: 币种代码
         strategy_name: 策略名称
@@ -168,7 +170,8 @@ def run_single_backtest(
         interval: 时间粒度
         capital: 初始资金
         fetcher: 数据获取器
-        
+        generate_html: 是否生成 HTML 报告
+
     Returns:
         (BacktestResult, DataFrame) 元组，如果失败则返回 (None, None)
     """
@@ -237,6 +240,24 @@ def run_single_backtest(
     logger.info(f"   最大回撤: {result.metrics.get('max_drawdown_pct', 0):.2f}%")
     logger.info(f"   胜率: {result.metrics.get('win_rate_pct', 0):.2f}%")
     logger.info(f"   交易次数: {result.metrics.get('total_trades', 0)}")
+
+    # 6. 生成 HTML 报告
+    if generate_html:
+        try:
+            html_generator = HTMLReportGenerator()
+            html_file = f"results/{strategy_name}_{coin}_{days}d_{interval}_{timestamp}.html"
+            html_generator.generate_single_report(
+                result=result,
+                df=df,
+                strategy_name=strategy_name,
+                coin=coin,
+                days=days,
+                interval=interval,
+                capital=capital,
+                output_path=html_file,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  HTML 报告生成失败: {e}")
 
     return result, df
 
@@ -308,7 +329,36 @@ def compare_strategies(
     # 生成可视化报告
     if save_report and results:
         viz = Visualizer()
-        viz.create_comparison_report(results, coin, "results", days, interval)
+        chart_paths = viz.create_comparison_report(results, coin, "results", days, interval)
+
+        # 生成 HTML 对比报告
+        try:
+            html_generator = HTMLReportGenerator()
+            timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+            html_file = f"results/comparison_{coin}_{days}d_{interval}_{timestamp}.html"
+
+            # 将图表路径映射为 HTML 需要的格式
+            charts_base64 = {}
+            if chart_paths:
+                for path in chart_paths:
+                    if "metrics" in path:
+                        charts_base64["metrics"] = path
+                    elif "ranking" in path:
+                        charts_base64["ranking"] = path
+                    elif "equity" in path:
+                        charts_base64["equity"] = path
+
+            html_generator.generate_comparison_report(
+                results=results,
+                coin=coin,
+                days=days,
+                interval=interval,
+                capital=capital,
+                output_path=html_file,
+                chart_paths=charts_base64 if chart_paths else None,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  HTML 对比报告生成失败: {e}")
 
     return results
 
