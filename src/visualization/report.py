@@ -20,6 +20,8 @@ class ReportMixin:
         strategy_name: str,
         coin: str,
         output_dir: str = "results",
+        days: int = 730,
+        interval: str = "1h",
     ) -> List[str]:
         """
         生成完整报告（包含所有图表）
@@ -32,6 +34,8 @@ class ReportMixin:
             strategy_name: 策略名称
             coin: 币种
             output_dir: 输出目录
+            days: 回测天数
+            interval: 时间粒度
 
         Returns:
             生成的文件路径列表
@@ -39,7 +43,12 @@ class ReportMixin:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        base_name = f"{output_dir}/{strategy_name}_{coin}"
+        # 生成时间戳
+        import pandas as pd
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+
+        # 文件命名格式: {strategy}_{coin}_{days}d_{interval}_{timestamp}_{type}.png
+        base_name = f"{output_dir}/{strategy_name}_{coin}_{days}d_{interval}_{timestamp}"
         generated_files = []
 
         # 1. 权益曲线
@@ -84,6 +93,8 @@ class ReportMixin:
         results: Dict[str, object],
         coin: str,
         output_dir: str = "results",
+        days: int = 730,
+        interval: str = "1h",
     ) -> List[str]:
         """
         生成策略对比报告
@@ -97,6 +108,8 @@ class ReportMixin:
             results: Dict[str, BacktestResult] - 策略结果字典
             coin: 币种
             output_dir: 输出目录
+            days: 回测天数
+            interval: 时间粒度
 
         Returns:
             生成的文件路径列表
@@ -104,35 +117,40 @@ class ReportMixin:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
+        # 生成时间戳
+        import pandas as pd
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+
+        # 文件命名格式: comparison_{type}_{coin}_{days}d_{interval}_{timestamp}.png
         generated_files = []
 
         # 1. 核心指标对比
         fig1 = self.plot_metrics_comparison(
             results,
-            save_path=f"{output_dir}/comparison_metrics_{coin}.png",
+            save_path=f"{output_dir}/comparison_metrics_{coin}_{days}d_{interval}_{timestamp}.png",
             show_plot=False,
         )
-        generated_files.append(f"{output_dir}/comparison_metrics_{coin}.png")
+        generated_files.append(f"{output_dir}/comparison_metrics_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig1)
 
         # 2. 策略排名
         fig2 = self.plot_strategy_ranking(
             results,
             metric="sharpe_ratio",
-            save_path=f"{output_dir}/comparison_ranking_{coin}.png",
+            save_path=f"{output_dir}/comparison_ranking_{coin}_{days}d_{interval}_{timestamp}.png",
             show_plot=False,
         )
-        generated_files.append(f"{output_dir}/comparison_ranking_{coin}.png")
+        generated_files.append(f"{output_dir}/comparison_ranking_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig2)
 
         # 3. 权益曲线对比
         fig3 = self.plot_equity_comparison(
             results,
-            save_path=f"{output_dir}/comparison_equity_{coin}.png",
+            save_path=f"{output_dir}/comparison_equity_{coin}_{days}d_{interval}_{timestamp}.png",
             show_plot=False,
             top_n=5,
         )
-        generated_files.append(f"{output_dir}/comparison_equity_{coin}.png")
+        generated_files.append(f"{output_dir}/comparison_equity_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig3)
 
         import logging

@@ -225,7 +225,7 @@ def run_single_backtest(
 
     # 4. 保存日志
     timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-    log_file = f"logs/backtest_{coin}_{strategy_name}_{timestamp}.json"
+    log_file = f"logs/backtest_{coin}_{strategy_name}_{days}d_{interval}_{timestamp}.json"
     result.save_logs(log_file)
 
     # 5. 打印结果
@@ -242,24 +242,24 @@ def run_single_backtest(
 
 
 def compare_strategies(
-    coin: str, 
-    days: int, 
-    interval: str, 
+    coin: str,
+    days: int,
+    interval: str,
     capital: float,
     save_report: bool = True
 ) -> Dict[str, BacktestResult]:
     """
     对比多个策略的性能
-    
+
     运行所有策略的回测并生成对比报告。
-    
+
     Args:
         coin: 币种代码
         days: 回测天数
         interval: 时间粒度
         capital: 初始资金
         save_report: 是否保存可视化报告
-        
+
     Returns:
         策略名称到 BacktestResult 的字典
     """
@@ -278,14 +278,14 @@ def compare_strategies(
         "grid",
         "martingale",
     ]
-    
+
     results: Dict[str, BacktestResult] = {}
     data_frames: Dict[str, pd.DataFrame] = {}
 
     fetcher = HistoricalDataFetcher(verify_ssl=False)
 
     logger.info(f"\n{'=' * 60}")
-    logger.info(f"📊 策略对比 | 币种: {coin.upper()}")
+    logger.info(f"📊 策略对比 | 币种: {coin.upper()} | 天数: {days}d | 周期: {interval}")
     logger.info(f"{'=' * 60}")
 
     # 运行每个策略的回测
@@ -308,7 +308,7 @@ def compare_strategies(
     # 生成可视化报告
     if save_report and results:
         viz = Visualizer()
-        viz.create_comparison_report(results, coin, "results")
+        viz.create_comparison_report(results, coin, "results", days, interval)
 
     return results
 
@@ -390,7 +390,7 @@ def main() -> None:
             if result and not args.no_viz:
                 viz = Visualizer()
                 viz.create_full_report(
-                    result, df, args.strategy, coin, "results"
+                    result, df, args.strategy, coin, "results", args.days, args.interval
                 )
     else:
         # 单次回测模式
@@ -407,7 +407,7 @@ def main() -> None:
         if result and not args.no_viz:
             viz = Visualizer()
             viz.create_full_report(
-                result, df, args.strategy, args.coin, "results"
+                result, df, args.strategy, args.coin, "results", args.days, args.interval
             )
 
     logger.info("\n✅ 回测完成！")
