@@ -70,6 +70,9 @@ htmlcov/
 # Results
 results/
 
+# Claude Code
+.claude/
+
 # Temporary files
 tmp/
 temp/
