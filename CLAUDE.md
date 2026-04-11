@@ -68,7 +68,18 @@ Four-layer pipeline: **Data → Strategy → Backtest → Visualization**
 
 ## Network Configuration (for restricted regions)
 
-Binance API may be geo-blocked (HTTP 451) in some regions (e.g. China). Use these environment variables to configure proxy and alternative endpoints:
+Binance API may be geo-blocked (HTTP 451) in some regions (e.g. China). Use OKX as an alternative data source (no proxy needed):
+
+```bash
+# Use OKX as data source (recommended for China users)
+python run_backtest.py --source okx --coin btc --strategy ma_cross --no-viz
+
+# Or set it as default via environment variable
+export CRYPTO_DATA_SOURCE=okx
+python run_backtest.py --coin btc --strategy ma_cross --no-viz
+```
+
+If you have a proxy, you can also use it with Binance:
 
 ```bash
 # Set HTTP proxy (supports HTTP/HTTPS/SOCKS5)

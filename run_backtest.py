@@ -147,6 +147,14 @@ Examples:
         help="Skip visualization charts",
     )
 
+    parser.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        choices=["binance", "okx"],
+        help="Data source for historical data (default: binance, use okx if Binance is blocked in your region)",
+    )
+
     return parser.parse_args()
 
 
@@ -265,7 +273,8 @@ def compare_strategies(
     days: int,
     interval: str,
     capital: float,
-    save_report: bool = True
+    save_report: bool = True,
+    data_source: str = None,
 ) -> Dict[str, BacktestResult]:
     """
     Compare performance of multiple strategies
@@ -278,6 +287,7 @@ def compare_strategies(
         interval: K-line interval
         capital: Initial capital
         save_report: Whether to save visualization report
+        data_source: Data source ("binance" or "okx")
 
     Returns:
         Dict mapping strategy name to BacktestResult
@@ -301,7 +311,7 @@ def compare_strategies(
     results: Dict[str, BacktestResult] = {}
     data_frames: Dict[str, pd.DataFrame] = {}
 
-    fetcher = HistoricalDataFetcher()
+    fetcher = HistoricalDataFetcher(data_source=data_source)
 
     logger.info(f"\n{'=' * 60}")
     logger.info(f"Strategy comparison | Coin: {coin.upper()} | Days: {days}d | Interval: {interval}")
@@ -418,12 +428,12 @@ def main() -> None:
 
     if args.compare:
         # Strategy comparison mode
-        compare_strategies(args.coin, args.days, args.interval, args.capital)
+        compare_strategies(args.coin, args.days, args.interval, args.capital, data_source=args.source)
 
     elif args.coin == "all":
         # Backtest all coins
         coins = ["btc", "eth", "sol"]
-        fetcher = HistoricalDataFetcher()
+        fetcher = HistoricalDataFetcher(data_source=args.source)
 
         for coin in coins:
             result, df = run_single_backtest(
@@ -442,7 +452,7 @@ def main() -> None:
                 )
     else:
         # Single backtest mode
-        fetcher = HistoricalDataFetcher()
+        fetcher = HistoricalDataFetcher(data_source=args.source)
         result, df = run_single_backtest(
             args.coin,
             args.strategy,
