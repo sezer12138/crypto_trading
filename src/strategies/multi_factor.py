@@ -88,7 +88,7 @@ class MultiFactorStrategy(TradingStrategy):
 
         # 成交量因子
         df["volume_ma"] = df["volume"].rolling(window=DEFAULT_VOLUME_MA_WINDOW).mean()
-        df["volume_ratio"] = df["volume"] / df["volume_ma"]
+        df["volume_ratio"] = df["volume"] / df["volume_ma"].replace(0, float("nan"))
 
         # 波动率
         df["returns"] = df["close"].pct_change()
@@ -155,14 +155,10 @@ class MultiFactorStrategy(TradingStrategy):
         df.loc[df["score"] > SCORE_BUY_THRESHOLD, "signal"] = 1
         df.loc[df["score"] < SCORE_SELL_THRESHOLD, "signal"] = -1
 
-        # 持仓状态（逐行管理，避免评分波动导致的信号抖动）
-        df["position"] = 0
-        position = 0
-        for i in range(len(df)):
-            if df["signal"].iloc[i] == 1:
-                position = 1
-            elif df["signal"].iloc[i] == -1:
-                position = 0
-            df.loc[df.index[i], "position"] = position
+        # 持仓状态（使用向量化前向填充，等效于逐行管理）
+        from strategies._helpers import forward_fill_position
+        df = forward_fill_position(df)
+        # 将 -1 持仓映射为 0（空仓），保持买入后持仓=1
+        df["position"] = df["position"].clip(lower=0)
 
         return df

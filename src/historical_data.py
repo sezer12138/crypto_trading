@@ -3,6 +3,7 @@ Historical Data Fetcher for Crypto Trading
 获取BTC、ETH、SOL的历史数据用于回测
 """
 
+import random
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
@@ -133,7 +134,7 @@ class HistoricalDataFetcher:
             except requests.exceptions.SSLError as e:
                 logger.warning(f"⚠️  SSL错误 (尝试 {attempt + 1}/{self.max_retries}): {e}")
                 if attempt < self.max_retries - 1:
-                    sleep_time = self.retry_delay * (2 ** attempt)  # 指数退避
+                    sleep_time = self.retry_delay * (2 ** attempt) + random.uniform(0, 1)
                     logger.info(f"⏳  {sleep_time:.1f}秒后重试...")
                     time.sleep(sleep_time)
                 else:
@@ -143,7 +144,7 @@ class HistoricalDataFetcher:
             except requests.exceptions.RequestException as e:
                 logger.warning(f"⚠️  请求错误 (尝试 {attempt + 1}/{self.max_retries}): {e}")
                 if attempt < self.max_retries - 1:
-                    sleep_time = self.retry_delay * (2 ** attempt)
+                    sleep_time = self.retry_delay * (2 ** attempt) + random.uniform(0, 1)
                     logger.info(f"⏳  {sleep_time:.1f}秒后重试...")
                     time.sleep(sleep_time)
                 else:

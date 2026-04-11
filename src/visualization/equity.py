@@ -106,5 +106,6 @@ class EquityPlotMixin:
 
         if show_plot:
             plt.show()
+            plt.close(fig)
 
         return fig

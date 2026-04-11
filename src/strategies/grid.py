@@ -72,23 +72,26 @@ class GridStrategy(TradingStrategy):
         df["position"] = 0.0
 
         current_position = 0.0
-        last_price = df["close"].iloc[0]
+        prices = df["close"].values
+        signals = [0] * len(df)
+        positions = [0.0] * len(df)
 
         for i in range(1, len(df)):
-            current_price = df["close"].iloc[i]
+            current_price = prices[i]
+            last_price = prices[i - 1]
 
             # 检查是否穿过任何网格线
-            for price in self.grid_prices:
-                # 价格跌破网格线 - 买入
-                if last_price > price and current_price <= price:
-                    df.loc[df.index[i], "signal"] = 1
+            for grid_price in self.grid_prices:
+                if last_price > grid_price and current_price <= grid_price:
+                    signals[i] = 1
                     current_position += self.amount_per_grid
-                # 价格突破网格线 - 卖出
-                elif last_price < price and current_price >= price:
-                    df.loc[df.index[i], "signal"] = -1
+                elif last_price < grid_price and current_price >= grid_price:
+                    signals[i] = -1
                     current_position = max(0, current_position - self.amount_per_grid)
 
-            df.loc[df.index[i], "position"] = current_position
-            last_price = current_price
+            positions[i] = current_position
+
+        df["signal"] = signals
+        df["position"] = positions
 
         return df

@@ -38,20 +38,6 @@ class RSIStrategy(TradingStrategy):
         self.oversold = oversold
         self.overbought = overbought
 
-    def calculate_rsi(self, prices: pd.Series) -> pd.Series:
-        """
-        计算 RSI 指标
-
-        委托给共享的 calculate_rsi 辅助函数实现。
-
-        Args:
-            prices: 价格序列
-
-        Returns:
-            RSI 值序列
-        """
-        return calculate_rsi(prices, self.period)
-
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         生成交易信号

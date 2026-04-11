@@ -53,7 +53,8 @@ class MomentumStrategy(TradingStrategy):
         """
         df = df.copy()
         # 变化率
-        df["roc"] = (df["close"] - df["close"].shift(self.roc_period)) / df["close"].shift(self.roc_period)
+        shifted = df["close"].shift(self.roc_period)
+        df["roc"] = (df["close"] - shifted) / shifted.replace(0, float("nan"))
         # 动量指标
         df["momentum"] = df["close"] - df["close"].shift(self.momentum_period)
         df["momentum_norm"] = df["momentum"] / df["close"] * 100

@@ -121,21 +121,22 @@ class MartingaleStrategy(TradingStrategy):
             添加了 signal, position 列的 DataFrame
         """
         df = df.copy()
-        df["signal"] = 0
-        df["position"] = 0.0
+        prices = df["close"].values
+        signals = [0] * len(df)
+        positions = [0.0] * len(df)
 
         current_step = 0
         entry_price = 0.0
         in_position = False
 
         for i in range(1, len(df)):
-            current_price = df["close"].iloc[i]
-
             signal, entry_price, current_step, in_position = self._update_martingale_position(
-                current_price, entry_price, current_step, in_position
+                prices[i], entry_price, current_step, in_position
             )
 
-            df.loc[df.index[i], "signal"] = signal
-            df.loc[df.index[i], "position"] = (current_step + 1) if in_position else 0
+            signals[i] = signal
+            positions[i] = (current_step + 1) if in_position else 0
 
+        df["signal"] = signals
+        df["position"] = positions
         return df

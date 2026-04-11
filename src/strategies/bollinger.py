@@ -55,7 +55,7 @@ class BollingerBandsStrategy(TradingStrategy):
         df["std"] = df["close"].rolling(window=self.window).std()
         df["upper_band"] = df["middle_band"] + (df["std"] * self.num_std)
         df["lower_band"] = df["middle_band"] - (df["std"] * self.num_std)
-        df["bandwidth"] = (df["upper_band"] - df["lower_band"]) / df["middle_band"]
+        df["bandwidth"] = (df["upper_band"] - df["lower_band"]) / df["middle_band"].replace(0, float("nan"))
         return df
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:

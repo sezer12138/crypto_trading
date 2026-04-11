@@ -5,6 +5,7 @@
 包括: 信号前向填充、交叉检测、RSI 计算等。
 """
 
+import numpy as np
 import pandas as pd
 from strategies.constants import DEFAULT_RSI_PERIOD
 
@@ -96,8 +97,10 @@ def calculate_rsi(prices: pd.Series, period: int = DEFAULT_RSI_PERIOD) -> pd.Ser
         RSI 值序列，范围 [0, 100]，前 period-1 个值为 NaN
     """
     delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    gain = delta.clip(lower=0).rolling(window=period).mean()
+    loss = (-delta.clip(upper=0)).rolling(window=period).mean()
+    # 防止除零: loss 为 0 时 RSI 为 100（全涨）
+    rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.fillna(100)
     return rsi

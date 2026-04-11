@@ -28,7 +28,8 @@ class BinanceWebSocketClient:
         self.coins = coins or ["btc", "eth", "sol"]
         self.on_message_callback = on_message_callback
         self.ws = None
-        self.is_running = False
+        self._lock = threading.Lock()
+        self._running = threading.Event()
         self.reconnect_interval = 5
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 10
@@ -65,9 +66,9 @@ class BinanceWebSocketClient:
     def _on_close(self, ws, close_status_code, close_msg):
         """Handle WebSocket connection close."""
         logger.info(f"WebSocket connection closed: {close_status_code} - {close_msg}")
-        self.is_running = False
+        self._running.clear()
 
-        # Auto-reconnect with limit
+        # Auto-reconnect with limit (only if not intentionally stopped)
         if close_status_code != 1000 and self.reconnect_attempts < self.max_reconnect_attempts:
             self.reconnect_attempts += 1
             wait_time = min(self.reconnect_interval * self.reconnect_attempts, 60)
@@ -82,7 +83,7 @@ class BinanceWebSocketClient:
     def _on_open(self, ws):
         """Handle WebSocket connection open."""
         logger.info("WebSocket connection established")
-        self.is_running = True
+        self._running.set()
         self.reconnect_attempts = 0  # Reset counter on successful connection
 
     def _format_ticker_data(self, data: Dict) -> Dict:
@@ -111,36 +112,55 @@ class BinanceWebSocketClient:
         emoji = "📈" if change >= 0 else "📉"
         print(f" | {emoji} {change:+.2f}% | Vol: ${data['quote_volume']:,.0f}")
 
+    @property
+    def is_running(self) -> bool:
+        """Thread-safe running state."""
+        return self._running.is_set()
+
+    @is_running.setter
+    def is_running(self, value: bool):
+        if value:
+            self._running.set()
+        else:
+            self._running.clear()
+
     def start(self):
         """Start WebSocket connection."""
-        websocket.enableTrace(False)
+        with self._lock:
+            # 防止重复启动
+            if self._running.is_set():
+                logger.warning("WebSocket is already running")
+                return
 
-        # Create SSL context that works behind firewalls/proxies
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+            websocket.enableTrace(False)
 
-        self.ws = websocket.WebSocketApp(
-            self._get_stream_url(use_port_443=True),
-            on_open=self._on_open,
-            on_message=self._on_message,
-            on_error=self._on_error,
-            on_close=self._on_close,
-        )
+            # Create SSL context that works behind firewalls/proxies
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
 
-        # Run in separate thread with SSL context
-        self.ws_thread = threading.Thread(
-            target=self.ws.run_forever, kwargs={"sslopt": {"context": ssl_context}}
-        )
-        self.ws_thread.daemon = True
-        self.ws_thread.start()
+            self.ws = websocket.WebSocketApp(
+                self._get_stream_url(use_port_443=True),
+                on_open=self._on_open,
+                on_message=self._on_message,
+                on_error=self._on_error,
+                on_close=self._on_close,
+            )
+
+            # Run in separate thread with SSL context
+            self.ws_thread = threading.Thread(
+                target=self.ws.run_forever, kwargs={"sslopt": {"context": ssl_context}}
+            )
+            self.ws_thread.daemon = True
+            self.ws_thread.start()
 
     def stop(self):
         """Stop WebSocket connection."""
-        if self.ws:
-            self.ws.close()
-        self.is_running = False
-        logger.info("WebSocket client stopped")
+        with self._lock:
+            self._running.clear()
+            if self.ws:
+                self.ws.close()
+            logger.info("WebSocket client stopped")
 
 
 class AggregatedDataClient:
@@ -149,14 +169,16 @@ class AggregatedDataClient:
     def __init__(self, coins: list = None):
         self.coins = coins or ["btc", "eth", "sol"]
         self.latest_data = {}
+        self._data_lock = threading.Lock()
         self.ws_client = BinanceWebSocketClient(
             coins=self.coins, on_message_callback=self._update_data
         )
 
     def _update_data(self, data: Dict):
-        """Update latest data from WebSocket and display."""
+        """Update latest data from WebSocket and display. Thread-safe."""
         coin = data["coin"].lower()
-        self.latest_data[coin] = data
+        with self._data_lock:
+            self.latest_data[coin] = data
 
         # 实时显示数据
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -191,10 +213,11 @@ class AggregatedDataClient:
         self.ws_client.stop()
 
     def get_latest(self, coin: str = None) -> Dict:
-        """Get latest data for a specific coin or all coins."""
-        if coin:
-            return self.latest_data.get(coin.lower())
-        return self.latest_data
+        """Get latest data for a specific coin or all coins. Thread-safe."""
+        with self._data_lock:
+            if coin:
+                return self.latest_data.get(coin.lower())
+            return dict(self.latest_data)
 
 
 if __name__ == "__main__":

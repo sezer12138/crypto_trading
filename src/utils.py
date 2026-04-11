@@ -5,6 +5,7 @@ Utility functions for crypto trading data fetcher
 import json
 import csv
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -155,36 +156,41 @@ class DataCache:
     def __init__(self, max_size: int = 1000):
         self.cache = {}
         self.max_size = max_size
+        self._lock = threading.Lock()
 
     def set(self, key: str, value, ttl: int = 60):
-        """Set cache value with TTL (seconds)."""
-        if len(self.cache) >= self.max_size:
-            self._evict()
-        self.cache[key] = {"value": value, "expires": datetime.now().timestamp() + ttl}
+        """Set cache value with TTL (seconds). Thread-safe."""
+        with self._lock:
+            if len(self.cache) >= self.max_size:
+                self._evict()
+            self.cache[key] = {"value": value, "expires": datetime.now().timestamp() + ttl}
 
     def _evict(self):
-        """淘汰缓存条目：优先移除已过期的，否则移除最早到期的。"""
+        """淘汰缓存条目：优先移除已过期的，否则逐步移除最早到期的直到低于上限。"""
         now = datetime.now().timestamp()
         expired_keys = [k for k, v in self.cache.items() if v["expires"] <= now]
         for k in expired_keys:
             del self.cache[k]
-        if len(self.cache) >= self.max_size:
+        # 逐步移除最早到期的条目直到低于上限
+        while len(self.cache) >= self.max_size and self.cache:
             oldest_key = min(self.cache, key=lambda k: self.cache[k]["expires"])
             del self.cache[oldest_key]
 
     def get(self, key: str):
-        """Get cached value if not expired."""
-        if key in self.cache:
-            entry = self.cache[key]
+        """Get cached value if not expired. Thread-safe."""
+        with self._lock:
+            entry = self.cache.get(key)
+            if entry is None:
+                return None
             if datetime.now().timestamp() < entry["expires"]:
                 return entry["value"]
-            else:
-                del self.cache[key]
-        return None
+            del self.cache[key]
+            return None
 
     def clear(self):
-        """Clear all cached data."""
-        self.cache.clear()
+        """Clear all cached data. Thread-safe."""
+        with self._lock:
+            self.cache.clear()
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ ATR 动态止损策略
     >>> result_df = strategy.generate_signals(df)
 """
 
+import numpy as np
 import pandas as pd
 from strategies._base import TradingStrategy
 from strategies._helpers import forward_fill_position
@@ -56,9 +57,9 @@ class ATRStopLossStrategy(TradingStrategy):
             ATR 值序列
         """
         high_low = df["high"] - df["low"]
-        high_close = abs(df["high"] - df["close"].shift(1))
-        low_close = abs(df["low"] - df["close"].shift(1))
-        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        high_close = (df["high"] - df["close"].shift(1)).abs()
+        low_close = (df["low"] - df["close"].shift(1)).abs()
+        tr = np.maximum(np.maximum(high_low, high_close), low_close)
         return tr.rolling(window=self.atr_period).mean()
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:

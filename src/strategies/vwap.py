@@ -50,7 +50,7 @@ class VWAPStrategy(TradingStrategy):
         typical_price = (df["high"] + df["low"] + df["close"]) / 3
         df["vwap"] = (typical_price * df["volume"]).rolling(window=self.window).sum() / \
                      df["volume"].rolling(window=self.window).sum()
-        df["vwap_dev"] = (df["close"] - df["vwap"]) / df["vwap"]
+        df["vwap_dev"] = (df["close"] - df["vwap"]) / df["vwap"].replace(0, float("nan"))
         return df
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:

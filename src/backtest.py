@@ -202,31 +202,19 @@ class BacktestResult:
         drawdown = (self.equity_curve - cummax) / cummax
         max_drawdown = drawdown.min() * 100
         
-        # 胜率（统计卖出时的盈利情况）
-        sell_trades = [t for t in self.trades if t.action == "sell"]
-        if len(sell_trades) > 0:
-            # 通过查找对应的买入记录计算盈亏
-            profitable_sells = 0
-            for sell in sell_trades:
-                # 找到前一笔买入
-                buy_idx = None
-                for i, trade in enumerate(self.trades):
-                    if trade == sell:
-                        # 查找之前的买入
-                        for j in range(i-1, -1, -1):
-                            if self.trades[j].action == "buy":
-                                buy_idx = j
-                                break
-                        break
-                
-                if buy_idx is not None:
-                    buy = self.trades[buy_idx]
-                    if sell.price > buy.price:
-                        profitable_sells += 1
-            
-            win_rate = (profitable_sells / len(sell_trades)) * 100
-        else:
-            win_rate = 0.0
+        # 胜率（统计卖出时的盈利情况）— O(n) 单次遍历
+        profitable_sells = 0
+        total_sells = 0
+        last_buy_price = None
+        for trade in self.trades:
+            if trade.action == "buy":
+                last_buy_price = trade.price
+            elif trade.action == "sell":
+                total_sells += 1
+                if last_buy_price is not None and trade.price > last_buy_price:
+                    profitable_sells += 1
+
+        win_rate = (profitable_sells / total_sells * 100) if total_sells > 0 else 0.0
         
         # 交易统计
         num_trades = len(self.trades)

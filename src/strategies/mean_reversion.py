@@ -62,7 +62,9 @@ class MeanReversionStrategy(TradingStrategy):
         # 计算 Z-score
         df["mean"] = df["close"].rolling(window=self.window).mean()
         df["std"] = df["close"].rolling(window=self.window).std()
-        df["zscore"] = (df["close"] - df["mean"]) / df["std"]
+        # 防止除零: std 为 0 时（平盘）zscore 为 0
+        df["zscore"] = (df["close"] - df["mean"]) / df["std"].replace(0, float("nan"))
+        df["zscore"] = df["zscore"].fillna(0)
 
         df["signal"] = 0
 
