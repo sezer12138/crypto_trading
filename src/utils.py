@@ -178,15 +178,33 @@ def get_proxy() -> Dict[str, str]:
     """Get proxy configuration from environment variables.
 
     Checks CRYPTO_PROXY first, then falls back to HTTPS_PROXY / HTTP_PROXY.
+    Validates that the proxy is reachable before returning it.
 
     Returns:
         Dict suitable for requests.get(proxies=...), e.g. {"https": "http://127.0.0.1:7890"}
-        Returns empty dict if no proxy is configured.
+        Returns empty dict if no proxy is configured or proxy is unreachable.
     """
+    import socket
     proxy_url = os.environ.get("CRYPTO_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-    if proxy_url:
+    if not proxy_url:
+        return {}
+
+    # Validate proxy is reachable
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(proxy_url)
+        host = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=2):
+            pass
         return {"http": proxy_url, "https": proxy_url}
-    return {}
+    except (OSError, socket.timeout) as e:
+        logger.warning(
+            f"Proxy {proxy_url} is not reachable ({e}). "
+            "Falling back to direct connection. "
+            "To fix: unset CRYPTO_PROXY or start your proxy."
+        )
+        return {}
 
 
 def get_binance_base_url() -> str:
