@@ -1,13 +1,13 @@
 """
-可视化模块
+Visualization Module
 
-提供回测结果的图表生成功能，包括:
-- 权益曲线与回撤分析
-- 价格图表与交易信号
-- 月度收益热力图
-- 多策略性能对比
+Provides chart generation for backtest results, including:
+- Equity curve and drawdown analysis
+- Price charts and trading signals
+- Monthly returns heatmap
+- Multi-strategy performance comparison
 
-使用示例:
+Usage:
     >>> from visualization import Visualizer
     >>> viz = Visualizer(style='seaborn-v0_8-darkgrid')
     >>> viz.plot_equity_curve(result, title='BTC Strategy', save_path='equity.png')
@@ -30,15 +30,15 @@ class Visualizer(
     VisualizerBase,
 ):
     """
-    回测结果可视化器
+    Backtest Result Visualizer
 
-    通过混入组合各类型绘图方法，提供单一 Visualizer 接口。
+    Composes plotting methods via mixins, providing a single Visualizer interface.
 
     Args:
-        style: Matplotlib 样式名称，默认为 'seaborn-v0_8'
-        fig_dpi: 图表保存分辨率，默认 300
+        style: Matplotlib style name, defaults to 'seaborn-v0_8'
+        fig_dpi: Chart save resolution, defaults to 300
 
-    使用示例:
+    Usage:
         >>> viz = Visualizer()
         >>> viz.plot_equity_curve(result, title='My Strategy')
         >>> viz.create_full_report(result, df, 'MultiFactor', 'BTC')

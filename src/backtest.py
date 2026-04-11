@@ -1,26 +1,25 @@
 """
-Backtest Engine
-回测引擎 - 模拟历史交易并计算收益指标
+Backtest Engine - Simulates historical trading and calculates performance metrics
 
-本模块提供完整的回测功能，包括：
-    - 模拟真实交易环境（手续费、滑点）
-    - 详细的交易记录和决策日志
-    - 完整的绩效指标计算
-    - 支持仓位管理
+This module provides complete backtesting functionality, including:
+    - Simulated real trading environment (commission, slippage)
+    - Detailed trade records and decision logs
+    - Comprehensive performance metric calculations
+    - Position management support
 
 Classes:
-    Trade: 单笔交易记录
-    BacktestResult: 回测结果容器
-    BacktestEngine: 回测引擎主类
+    Trade: Single trade record
+    BacktestResult: Backtest result container
+    BacktestEngine: Main backtest engine class
 
 Example:
     >>> from backtest import BacktestEngine
     >>> from strategies import MovingAverageCrossStrategy
-    >>> 
+    >>>
     >>> engine = BacktestEngine(initial_capital=10000.0)
     >>> strategy = MovingAverageCrossStrategy()
     >>> result = engine.run_backtest(df, strategy, coin='BTC')
-    >>> print(f"总收益: {result.metrics['total_return_pct']:.2f}%")
+    >>> print(f"Total return: {result.metrics['total_return_pct']:.2f}%")
 """
 
 import json
@@ -33,17 +32,17 @@ from typing import Dict, List, Optional, Any
 import numpy as np
 import pandas as pd
 
-# 配置日志
+# Configure logging
 logger = logging.getLogger(__name__)
 
-# 确保日志目录存在
+# Ensure log directory exists
 Path("logs").mkdir(parents=True, exist_ok=True)
 
-# 回测常量
+# Backtest constants
 SIGNAL_BUY = 1
 SIGNAL_SELL = -1
 SIGNAL_HOLD = 0
-RISK_FREE_RATE = 0.02  # 无风险利率 2%
+RISK_FREE_RATE = 0.02  # Risk-free rate 2%
 DAYS_PER_YEAR = 365
 DAYS_PER_MONTH = 30
 
@@ -51,19 +50,19 @@ DAYS_PER_MONTH = 30
 @dataclass
 class Trade:
     """
-    单笔交易记录
-    
-    记录一次完整的交易操作，包括时间、价格、数量等信息。
-    
+    Single trade record
+
+    Records a complete trade operation, including time, price, quantity, etc.
+
     Attributes:
-        timestamp: 交易时间
-        action: 交易动作 ('buy' 或 'sell')
-        price: 成交价格
-        quantity: 交易数量
-        value: 交易金额
-        coin: 交易币种
-        strategy_signal: 策略信号值 (1=买入, -1=卖出)
-        
+        timestamp: Trade time
+        action: Trade action ('buy' or 'sell')
+        price: Execution price
+        quantity: Trade quantity
+        value: Trade value
+        coin: Traded coin
+        strategy_signal: Strategy signal value (1=buy, -1=sell)
+
     Example:
         >>> trade = Trade(
         ...     timestamp=datetime.now(),
@@ -84,7 +83,7 @@ class Trade:
     strategy_signal: int
     
     def to_dict(self) -> Dict[str, Any]:
-        """将交易记录转换为字典格式"""
+        """Convert trade record to dictionary format"""
         return {
             "timestamp": self.timestamp.isoformat(),
             "action": self.action,
@@ -99,23 +98,24 @@ class Trade:
 @dataclass
 class BacktestResult:
     """
-    回测结果容器
-    
-    存储回测的全部结果数据，包括交易记录、权益曲线、绩效指标等。
-    
+    Backtest result container
+
+    Stores all backtest result data, including trade records, equity curve,
+    performance metrics, etc.
+
     Attributes:
-        trades: 交易记录列表
-        daily_returns: 日收益率序列
-        cumulative_returns: 累计收益率序列
-        equity_curve: 权益曲线（资金变化）
-        metrics: 绩效指标字典
-        decision_log: 决策日志列表
-        
+        trades: List of trade records
+        daily_returns: Daily return series
+        cumulative_returns: Cumulative return series
+        equity_curve: Equity curve (capital changes)
+        metrics: Performance metrics dictionary
+        decision_log: Decision log list
+
     Methods:
-        add_trade: 添加交易记录
-        add_decision: 添加决策记录
-        calculate_metrics: 计算绩效指标
-        save_logs: 保存日志到文件
+        add_trade: Add a trade record
+        add_decision: Add a decision record
+        calculate_metrics: Calculate performance metrics
+        save_logs: Save logs to file
     """
     trades: List[Trade] = field(default_factory=list)
     daily_returns: Optional[pd.Series] = None
@@ -126,28 +126,28 @@ class BacktestResult:
     
     def add_trade(self, trade: Trade) -> None:
         """
-        添加交易记录
-        
+        Add a trade record
+
         Args:
-            trade: Trade 对象
+            trade: Trade object
         """
         self.trades.append(trade)
     
     def add_decision(
-        self, 
-        timestamp: datetime, 
-        decision: str, 
-        reason: str, 
+        self,
+        timestamp: datetime,
+        decision: str,
+        reason: str,
         **kwargs
     ) -> None:
         """
-        记录每一步决策
-        
+        Log each decision step
+
         Args:
-            timestamp: 决策时间
-            decision: 决策类型 ('hold', 'buy', 'sell')
-            reason: 决策原因说明
-            **kwargs: 其他相关数据（如 price, cash, position 等）
+            timestamp: Decision time
+            decision: Decision type ('hold', 'buy', 'sell')
+            reason: Reason for the decision
+            **kwargs: Other relevant data (e.g., price, cash, position, etc.)
         """
         self.decision_log.append({
             "timestamp": timestamp.isoformat(),
@@ -158,58 +158,58 @@ class BacktestResult:
     
     def calculate_metrics(self) -> Dict[str, float]:
         """
-        计算回测绩效指标
-        
-        计算的指标包括：
-        - total_return_pct: 总收益率 (%)
-        - annual_return_pct: 年化收益率 (%)
-        - volatility_pct: 年化波动率 (%)
-        - sharpe_ratio: 夏普比率
-        - max_drawdown_pct: 最大回撤 (%)
-        - win_rate_pct: 胜率 (%)
-        - total_trades: 总交易次数
-        - trades_per_month: 月均交易次数
-        
+        Calculate backtest performance metrics
+
+        Calculated metrics include:
+        - total_return_pct: Total return (%)
+        - annual_return_pct: Annualized return (%)
+        - volatility_pct: Annualized volatility (%)
+        - sharpe_ratio: Sharpe ratio
+        - max_drawdown_pct: Maximum drawdown (%)
+        - win_rate_pct: Win rate (%)
+        - total_trades: Total number of trades
+        - trades_per_month: Average trades per month
+
         Returns:
-            包含各项指标的字典
+            Dictionary containing all metrics
         """
         if self.daily_returns is None or len(self.daily_returns) == 0:
-            logger.warning("没有日收益数据，无法计算指标")
+            logger.warning("No daily return data available, cannot calculate metrics")
             return {}
-        
+
         returns = self.daily_returns.dropna()
-        
+
         if len(returns) == 0:
-            logger.warning("日收益数据为空")
+            logger.warning("Daily return data is empty")
             return {}
-        
-        # 基础指标
+
+        # Basic metrics
         total_return = (self.equity_curve.iloc[-1] / self.equity_curve.iloc[0] - 1) * 100
-        
-        # 计算时间跨度（天数）
+
+        # Calculate time span (days)
         days = (self.equity_curve.index[-1] - self.equity_curve.index[0]).days
         if days <= 0:
-            logger.warning("数据时间跨度无效")
+            logger.warning("Invalid data time span")
             return {}
-        
-        # 年化收益
+
+        # Annualized return
         annual_return = ((1 + total_return / 100) ** (DAYS_PER_YEAR / days) - 1) * 100
 
-        # 年化波动率
+        # Annualized volatility
         volatility = returns.std() * np.sqrt(DAYS_PER_YEAR) * 100
 
-        # 夏普比率
+        # Sharpe ratio
         if volatility > 0:
             sharpe_ratio = (annual_return / 100 - RISK_FREE_RATE) / (volatility / 100)
         else:
             sharpe_ratio = 0.0
-        
-        # 最大回撤
+
+        # Maximum drawdown
         cummax = self.equity_curve.cummax()
         drawdown = (self.equity_curve - cummax) / cummax
         max_drawdown = drawdown.min() * 100
-        
-        # 胜率（统计卖出时的盈利情况）— O(n) 单次遍历
+
+        # Win rate (profitability on sell trades) - O(n) single pass
         profitable_sells = 0
         total_sells = 0
         last_buy_price = None
@@ -222,8 +222,8 @@ class BacktestResult:
                     profitable_sells += 1
 
         win_rate = (profitable_sells / total_sells * 100) if total_sells > 0 else 0.0
-        
-        # 交易统计
+
+        # Trade statistics
         num_trades = len(self.trades)
         trades_per_month = num_trades / (days / DAYS_PER_MONTH) if days > 0 else 0
         
@@ -242,10 +242,10 @@ class BacktestResult:
     
     def save_logs(self, filepath: str) -> None:
         """
-        保存决策日志到 JSON 文件
-        
+        Save decision log to JSON file
+
         Args:
-            filepath: 保存路径
+            filepath: Save path
         """
         log_data = {
             "metrics": self.metrics,
@@ -259,31 +259,31 @@ class BacktestResult:
         with open(filepath, "w", encoding='utf-8') as f:
             json.dump(log_data, f, indent=2, default=str, ensure_ascii=False)
         
-        logger.info(f"💾 决策日志已保存: {filepath}")
+        logger.info(f"Decision log saved: {filepath}")
 
 
 class BacktestEngine:
     """
-    回测引擎主类
-    
-    模拟历史交易环境，执行策略并计算收益。
-    支持手续费、滑点、仓位管理等真实交易因素。
-    
+    Main backtest engine class
+
+    Simulates a historical trading environment, executes strategies and calculates returns.
+    Supports real-world trading factors such as commission, slippage, and position management.
+
     Args:
-        initial_capital: 初始资金（默认 10000.0）
-        commission_rate: 手续费率（默认 0.001 = 0.1%）
-        slippage: 滑点率（默认 0.001 = 0.1%）
-        position_size: 仓位比例（默认 0.95 = 95%）
-        
+        initial_capital: Initial capital (default 10000.0)
+        commission_rate: Commission rate (default 0.001 = 0.1%)
+        slippage: Slippage rate (default 0.001 = 0.1%)
+        position_size: Position ratio (default 0.95 = 95%)
+
     Attributes:
-        initial_capital: 初始资金
-        commission_rate: 手续费率
-        slippage: 滑点率
-        position_size: 仓位比例
-        cash: 当前现金
-        position: 当前持仓数量
-        position_value: 当前持仓市值
-        
+        initial_capital: Initial capital
+        commission_rate: Commission rate
+        slippage: Slippage rate
+        position_size: Position ratio
+        cash: Current cash
+        position: Current position quantity
+        position_value: Current position value
+
     Example:
         >>> engine = BacktestEngine(
         ...     initial_capital=10000.0,
@@ -296,89 +296,89 @@ class BacktestEngine:
     def __init__(
         self,
         initial_capital: float = 10000.0,
-        commission_rate: float = 0.001,  # 0.1% 手续费
-        slippage: float = 0.001,  # 0.1% 滑点
-        position_size: float = 0.95,  # 仓位比例
+        commission_rate: float = 0.001,  # 0.1% commission
+        slippage: float = 0.001,  # 0.1% slippage
+        position_size: float = 0.95,  # Position ratio
     ):
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
         self.slippage = slippage
         self.position_size = position_size
         
-        # 状态变量
+        # State variables
         self.cash = initial_capital
-        self.position = 0.0  # 持仓数量
-        self.position_value = 0.0  # 持仓市值
-        
-        logger.info("🚀 回测引擎初始化")
-        logger.info(f"   初始资金: ${initial_capital:,.2f}")
-        logger.info(f"   手续费: {commission_rate * 100:.2f}%")
-        logger.info(f"   滑点: {slippage * 100:.2f}%")
-        logger.info(f"   仓位比例: {position_size * 100:.0f}%")
+        self.position = 0.0  # Position quantity
+        self.position_value = 0.0  # Position value
+
+        logger.info("Backtest engine initialized")
+        logger.info(f"   Initial capital: ${initial_capital:,.2f}")
+        logger.info(f"   Commission: {commission_rate * 100:.2f}%")
+        logger.info(f"   Slippage: {slippage * 100:.2f}%")
+        logger.info(f"   Position size: {position_size * 100:.0f}%")
     
     def run_backtest(
-        self, 
-        df: pd.DataFrame, 
-        strategy: object, 
+        self,
+        df: pd.DataFrame,
+        strategy: object,
         coin: str = "BTC"
     ) -> BacktestResult:
         """
-        运行回测
-        
-        使用给定策略在历史数据上执行回测。
-        
+        Run backtest
+
+        Executes a backtest on historical data using the given strategy.
+
         Args:
-            df: 包含价格数据的 DataFrame，需要有 'close' 列
-            strategy: 交易策略对象，需实现 generate_signals 方法
-            coin: 币种名称（用于日志和记录）
-            
+            df: DataFrame containing price data, must have a 'close' column
+            strategy: Trading strategy object, must implement generate_signals method
+            coin: Coin name (for logging and records)
+
         Returns:
-            BacktestResult 对象，包含完整的回测结果
-            
+            BacktestResult object containing complete backtest results
+
         Raises:
-            ValueError: 如果输入数据无效
+            ValueError: If input data is invalid
         """
         result = BacktestResult()
         
-        # 验证输入数据
+        # Validate input data
         if df.empty:
-            raise ValueError("输入数据为空")
+            raise ValueError("Input data is empty")
         if "close" not in df.columns:
-            raise ValueError("数据缺少 'close' 列")
-        
-        # 生成信号
+            raise ValueError("Data missing 'close' column")
+
+        # Generate signals
         df = strategy.generate_signals(df.copy())
-        
+
         if "signal" not in df.columns:
-            raise ValueError("策略未生成 'signal' 列")
-        
-        # 预提取数组以避免 iterrows() 的开销
+            raise ValueError("Strategy did not generate 'signal' column")
+
+        # Pre-extract arrays to avoid iterrows() overhead
         timestamps = df.index
         prices = df["close"].values
         signals = df["signal"].values.astype(int)
         equity_curve = np.empty(len(df))
 
-        logger.info(f"📊 开始回测 {coin}...")
-        logger.info(f"   策略: {strategy.name}")
-        logger.info(f"   数据点数: {len(df)}")
+        logger.info(f"Starting backtest for {coin}...")
+        logger.info(f"   Strategy: {strategy.name}")
+        logger.info(f"   Data points: {len(df)}")
 
         for i in range(len(df)):
             timestamp = timestamps[i]
             price = prices[i]
             signal = signals[i]
 
-            # 当前总资产
+            # Current total assets
             total_value = self.cash + self.position * price
             equity_curve[i] = total_value
 
-            # 决策逻辑
+            # Decision logic
             if signal == SIGNAL_BUY and self.position == 0:
                 self._execute_buy(timestamp, price, coin, result, df.iloc[i])
 
             elif signal == SIGNAL_SELL and self.position > 0:
                 self._execute_sell(timestamp, price, coin, result, df.iloc[i])
 
-            # 记录每一步状态
+            # Log each step's state
             result.add_decision(
                 timestamp=timestamp,
                 decision="hold" if signal == SIGNAL_HOLD else ("buy" if signal == SIGNAL_BUY else "sell"),
@@ -391,7 +391,7 @@ class BacktestEngine:
                 signal=signal,
             )
         
-        # 最后平仓（如果还有持仓）
+        # Close final position (if still holding)
         if self.position > 0:
             final_price = df["close"].iloc[-1]
             self._execute_sell(
@@ -399,56 +399,56 @@ class BacktestEngine:
                 df.iloc[-1], force=True
             )
         
-        # 计算结果
+        # Calculate results
         result.equity_curve = pd.Series(equity_curve, index=timestamps)
         result.daily_returns = result.equity_curve.pct_change().dropna()
         result.cumulative_returns = (
             result.equity_curve / result.equity_curve.iloc[0] - 1
         ) * 100
         
-        # 计算指标
+        # Calculate metrics
         result.calculate_metrics()
         
-        # 输出结果
-        logger.info("✅ 回测完成")
-        logger.info(f"   最终资产: ${result.equity_curve.iloc[-1]:,.2f}")
-        logger.info(f"   总收益率: {result.metrics.get('total_return_pct', 0):.2f}%")
-        logger.info(f"   交易次数: {len(result.trades) // 2}")
+        # Output results
+        logger.info("Backtest completed")
+        logger.info(f"   Final assets: ${result.equity_curve.iloc[-1]:,.2f}")
+        logger.info(f"   Total return: {result.metrics.get('total_return_pct', 0):.2f}%")
+        logger.info(f"   Trade count: {len(result.trades) // 2}")
         
         return result
     
     def _execute_buy(
-        self, 
-        timestamp: datetime, 
-        price: float, 
-        coin: str, 
-        result: BacktestResult, 
+        self,
+        timestamp: datetime,
+        price: float,
+        coin: str,
+        result: BacktestResult,
         row: pd.Series
     ) -> None:
         """
-        执行买入操作
-        
+        Execute buy operation
+
         Args:
-            timestamp: 交易时间
-            price: 当前价格
-            coin: 币种
-            result: BacktestResult 对象
-            row: 当前数据行
+            timestamp: Trade time
+            price: Current price
+            coin: Coin symbol
+            result: BacktestResult object
+            row: Current data row
         """
-        # 考虑滑点（买入时价格上升）
+        # Apply slippage (price increases on buy)
         executed_price = price * (1 + self.slippage)
-        
-        # 计算可买入金额（扣除手续费）
+
+        # Calculate buy amount (after deducting commission)
         position_value = self.cash * self.position_size
         commission = position_value * self.commission_rate
         quantity = (position_value - commission) / executed_price
-        
-        # 更新状态
+
+        # Update state
         self.position = quantity
         self.position_value = position_value
         self.cash -= position_value
-        
-        # 记录交易
+
+        # Record trade
         trade = Trade(
             timestamp=timestamp,
             action="buy",
@@ -461,9 +461,9 @@ class BacktestEngine:
         result.add_trade(trade)
         
         logger.debug(
-            f"   买入 @ ${executed_price:.2f}, "
-            f"数量: {quantity:.6f}, "
-            f"金额: ${position_value:.2f}"
+            f"   Buy @ ${executed_price:.2f}, "
+            f"Quantity: {quantity:.6f}, "
+            f"Value: ${position_value:.2f}"
         )
     
     def _execute_sell(
@@ -476,33 +476,33 @@ class BacktestEngine:
         force: bool = False,
     ) -> None:
         """
-        执行卖出操作
-        
+        Execute sell operation
+
         Args:
-            timestamp: 交易时间
-            price: 当前价格
-            coin: 币种
-            result: BacktestResult 对象
-            row: 当前数据行
-            force: 是否为强制平仓（默认 False）
+            timestamp: Trade time
+            price: Current price
+            coin: Coin symbol
+            result: BacktestResult object
+            row: Current data row
+            force: Whether this is a forced liquidation (default False)
         """
-        # 考虑滑点（卖出时价格下降）
+        # Apply slippage (price decreases on sell)
         executed_price = price * (1 - self.slippage)
-        
-        # 获取持仓数量（在更新前保存）
+
+        # Get position quantity (save before updating)
         sell_quantity = self.position
-        
-        # 计算卖出价值
+
+        # Calculate sell value
         sell_value = sell_quantity * executed_price
         commission = sell_value * self.commission_rate
         net_value = sell_value - commission
         
-        # 更新状态
+        # Update state
         self.cash += net_value
         self.position = 0.0
         self.position_value = 0.0
-        
-        # 记录交易
+
+        # Record trade
         signal_value = int(row["signal"]) if not force else -2
         trade = Trade(
             timestamp=timestamp,
@@ -516,24 +516,24 @@ class BacktestEngine:
         result.add_trade(trade)
         
         logger.debug(
-            f"   卖出 @ ${executed_price:.2f}, "
-            f"数量: {sell_quantity:.6f}, "
-            f"净收入: ${net_value:.2f}"
+            f"   Sell @ ${executed_price:.2f}, "
+            f"Quantity: {sell_quantity:.6f}, "
+            f"Net proceeds: ${net_value:.2f}"
         )
     
     def reset(self) -> None:
-        """重置引擎状态到初始值"""
+        """Reset engine state to initial values"""
         self.cash = self.initial_capital
         self.position = 0.0
         self.position_value = 0.0
-        logger.info("🔄 回测引擎已重置")
+        logger.info("Backtest engine reset")
 
 
 if __name__ == "__main__":
-    # 简单测试
+    # Simple test
     from strategies import MovingAverageCrossStrategy
-    
-    # 创建测试数据
+
+    # Create test data
     np.random.seed(42)
     dates = pd.date_range("2023-01-01", periods=100, freq="D")
     prices = 100 + np.cumsum(np.random.randn(100) * 2)
@@ -546,11 +546,11 @@ if __name__ == "__main__":
         "volume": np.random.randint(1000, 10000, 100),
     }, index=dates)
     
-    # 运行回测
+    # Run backtest
     strategy = MovingAverageCrossStrategy(short_window=5, long_window=20)
     engine = BacktestEngine(initial_capital=10000)
     result = engine.run_backtest(df, strategy, coin="TEST")
     
-    print("\n📈 回测结果:")
+    print("\nBacktest results:")
     for key, value in result.metrics.items():
         print(f"   {key}: {value}")

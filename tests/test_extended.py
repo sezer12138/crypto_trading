@@ -192,9 +192,9 @@ class TestHTMLReport:
             )
             assert Path(output).exists()
             content = Path(output).read_text()
-            assert "回测报告" in content
-            assert "核心绩效指标" in content
-            assert "总结与结论" in content
+            assert "Backtest Report" in content
+            assert "Key Performance Metrics" in content
+            assert "Summary & Conclusions" in content
 
     def test_comparison_report_generation(self, sample_data):
         results = {}
@@ -216,8 +216,8 @@ class TestHTMLReport:
             )
             assert Path(output).exists()
             content = Path(output).read_text()
-            assert "策略对比报告" in content
-            assert "最佳策略" in content
+            assert "Strategy Comparison Report" in content
+            assert "Best Strategy" in content
 
     def test_avg_holding_time(self, backtest_result):
         generator = HTMLReportGenerator()

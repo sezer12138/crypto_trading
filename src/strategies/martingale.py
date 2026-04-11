@@ -1,15 +1,16 @@
 """
-马丁格尔策略
+Martingale Strategy
 
-亏损后加倍下单，直到获利。属于高风险博弈策略，仅用于回测研究。
+Double the position after each loss until a profit is realized. A high-risk gambling strategy intended
+only for backtesting research.
 
-⚠️ 风险警告:
-    - 马丁格尔策略在连续亏损时会指数级增加仓位
-    - 第 N 次加倍时，单次仓位为初始的 2^N 倍
-    - 连续亏损多次后，累计损失可能非常巨大
-    - 此策略仅用于回测研究，切勿用于实盘交易
+WARNING - Risk Alert:
+    - The Martingale strategy exponentially increases position size after consecutive losses
+    - On the Nth doubling, the single position size is 2^N times the initial amount
+    - After multiple consecutive losses, cumulative losses can be enormous
+    - This strategy is strictly for backtesting research only; NEVER use it in live trading
 
-使用示例:
+Usage example:
     >>> from strategies import get_strategy
     >>> strategy = get_strategy('martingale', base_amount=0.001, multiplier=2.0)
     >>> result_df = strategy.generate_signals(df)
@@ -21,25 +22,25 @@ from strategies._base import TradingStrategy
 
 class MartingaleStrategy(TradingStrategy):
     """
-    马丁格尔策略 (Martingale Strategy)
+    Martingale Strategy
 
-    核心逻辑:
-    1. 初始买入 base_amount
-    2. 如果价格下跌达到止损比例，加倍买入 (乘以 multiplier)
-    3. 重复加倍，直到达到 max_steps 次或价格回升到止盈目标
-    4. 达到最大加倍次数后强制止损离场
+    Core logic:
+    1. Initial buy of base_amount
+    2. If price drops to the stop-loss percentage, double the buy (multiply by multiplier)
+    3. Continue doubling until max_steps is reached or price recovers to take-profit target
+    4. Force stop-loss exit after reaching maximum doubling steps
 
-    ⚠️ 此策略风险极高，仅用于回测研究。
+    WARNING: This strategy is extremely high-risk and is intended only for backtesting research.
 
     Args:
-        base_amount: 初始买入量 (默认 0.001)
-        multiplier: 加倍倍数 (默认 2.0)
-        max_steps: 最大加倍次数 (默认 5)
-        target_profit: 止盈目标比例 (默认 0.01 = 1%)
-        stop_loss: 单步止损触发比例 (默认 0.05 = 5%)
+        base_amount: Initial buy amount (default 0.001)
+        multiplier: Doubling multiplier (default 2.0)
+        max_steps: Maximum number of doubling steps (default 5)
+        target_profit: Take-profit target percentage (default 0.01 = 1%)
+        stop_loss: Single-step stop-loss trigger percentage (default 0.05 = 5%)
 
-    生成的指标列:
-        position: 当前持仓强度 (步数+1)，0 表示空仓
+    Generated indicator columns:
+        position: Current position intensity (step count + 1), 0 means no position
     """
 
     def __init__(
@@ -65,34 +66,34 @@ class MartingaleStrategy(TradingStrategy):
         in_position: bool,
     ) -> tuple:
         """
-        根据当前价格更新马丁格尔仓位
+        Update Martingale position based on current price
 
-        检查止盈/止损条件，决定是否平仓或加倍。
+        Checks take-profit/stop-loss conditions and decides whether to close position or double down.
 
         Args:
-            current_price: 当前价格
-            entry_price: 平均入场价格
-            current_step: 当前加倍步数
-            in_position: 是否持有仓位
+            current_price: Current price
+            entry_price: Average entry price
+            current_step: Current doubling step
+            in_position: Whether currently holding a position
 
         Returns:
-            (signal, new_entry_price, new_step, new_in_position) 元组
-            signal: 0=无操作, 1=加倍买入, -1=平仓
+            Tuple of (signal, new_entry_price, new_step, new_in_position)
+            signal: 0=No action, 1=Double buy, -1=Close position
         """
         if not in_position:
             return 1, current_price, 0, True
 
         price_change = (current_price - entry_price) / entry_price
 
-        # 达到目标止盈
+        # Target take-profit reached
         if price_change >= self.target_profit:
             return -1, 0.0, 0, False
 
-        # 亏损达到止损触发线 (随步数增加，触发线收紧)
+        # Loss reaches stop-loss trigger line (tightens as steps increase)
         stop_threshold = self.stop_loss / (current_step + 1)
         if price_change <= -stop_threshold:
             if current_step < self.max_steps:
-                # 加倍买入，更新平均入场价
+                # Double buy, update average entry price
                 total_weight = sum(self.multiplier ** j for j in range(current_step + 2))
                 last_weight = self.multiplier ** (current_step + 1)
                 new_entry_price = (
@@ -100,25 +101,25 @@ class MartingaleStrategy(TradingStrategy):
                 ) / total_weight
                 return 1, new_entry_price, current_step + 1, True
             else:
-                # 超过最大加倍次数，止损离场
+                # Exceeded maximum doubling steps, stop-loss exit
                 return -1, 0.0, 0, False
 
         return 0, entry_price, current_step, True
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        生成交易信号
+        Generate trading signals
 
-        逐行执行马丁格尔逻辑:
-        1. 无仓位时初始买入
-        2. 持仓时检查止盈/止损条件
-        3. 亏损时加倍买入，止盈时全部卖出
+        Executes Martingale logic row by row:
+        1. Initial buy when no position
+        2. Check take-profit/stop-loss conditions when holding position
+        3. Double down on loss, sell all on take-profit
 
         Args:
-            df: 包含 'close' 列的 DataFrame
+            df: DataFrame containing a 'close' column
 
         Returns:
-            添加了 signal, position 列的 DataFrame
+            DataFrame with signal, position columns added
         """
         df = df.copy()
         prices = df["close"].values

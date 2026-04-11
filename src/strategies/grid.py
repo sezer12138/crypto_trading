@@ -1,10 +1,10 @@
 """
-网格交易策略
+Grid Trading Strategy
 
-在预设的价格区间内，每隔一定间距挂单买入和卖出。
-适合震荡行情，不适合单边趋势市场。
+Place buy and sell orders at regular intervals within a preset price range.
+Suitable for sideways markets, not suitable for trending markets.
 
-使用示例:
+Usage example:
     >>> from strategies import get_strategy
     >>> strategy = get_strategy('grid', lower_price=50000, upper_price=70000)
     >>> result_df = strategy.generate_signals(df)
@@ -17,22 +17,22 @@ from strategies._base import TradingStrategy
 
 class GridStrategy(TradingStrategy):
     """
-    网格交易策略 (Grid Trading)
+    Grid Trading Strategy
 
-    在价格区间内均匀设置网格线:
-    - 价格下跌穿过网格线时买入
-    - 价格上涨穿过网格线时卖出
+    Evenly sets grid lines within a price range:
+    - Buy when price drops through a grid line
+    - Sell when price rises through a grid line
 
-    适合震荡行情，单边趋势中可能产生较大亏损。
+    Suitable for sideways markets; may incur significant losses in trending markets.
 
     Args:
-        lower_price: 网格下界价格
-        upper_price: 网格上界价格
-        grid_num: 网格数量 (默认 10)
-        amount_per_grid: 每格交易量 (默认 0.01)
+        lower_price: Grid lower bound price
+        upper_price: Grid upper bound price
+        grid_num: Number of grid levels (default 10)
+        amount_per_grid: Trade amount per grid (default 0.01)
 
-    生成的指标列:
-        position: 当前累计持仓量
+    Generated indicator columns:
+        position: Current cumulative position amount
     """
 
     def __init__(
@@ -48,24 +48,24 @@ class GridStrategy(TradingStrategy):
         self.grid_num = grid_num
         self.amount_per_grid = amount_per_grid
 
-        # 计算网格价格
+        # Calculate grid prices
         self.grid_prices = np.linspace(lower_price, upper_price, grid_num)
         self.buy_grids = [False] * grid_num
         self.sell_grids = [False] * grid_num
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        生成交易信号
+        Generate trading signals
 
-        逐行遍历价格数据，检查是否穿过网格线:
-        - 价格跌破网格线: 买入信号 (1)
-        - 价格突破网格线: 卖出信号 (-1)
+        Iterates through price data row by row, checking if grid lines are crossed:
+        - Price drops below grid line: Buy signal (1)
+        - Price rises above grid line: Sell signal (-1)
 
         Args:
-            df: 包含 'close' 列的 DataFrame
+            df: DataFrame containing a 'close' column
 
         Returns:
-            添加了 signal, position 列的 DataFrame
+            DataFrame with signal, position columns added
         """
         df = df.copy()
         df["signal"] = 0
@@ -80,7 +80,7 @@ class GridStrategy(TradingStrategy):
             current_price = prices[i]
             last_price = prices[i - 1]
 
-            # 检查是否穿过任何网格线
+            # Check if any grid line is crossed
             for grid_price in self.grid_prices:
                 if last_price > grid_price and current_price <= grid_price:
                     signals[i] = 1

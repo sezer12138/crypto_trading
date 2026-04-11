@@ -89,7 +89,7 @@ def run_rest_mode(args):
     fetcher = CryptoDataFetcher()
     fetcher.coins = coins
 
-    # CoinGecko 需要更长的间隔
+    # CoinGecko requires longer intervals
     if args.source == "coingecko" and args.interval < 60:
         print("⚠️  Warning: CoinGecko free API has rate limits (5-15 calls/min)")
         print("    Increasing interval to 60 seconds...")
@@ -109,7 +109,7 @@ def run_rest_mode(args):
         try:
             data = fetcher.get_all_coins_data(source=args.source)
             fetcher.display_data(data)
-            consecutive_errors = 0  # 重置错误计数
+            consecutive_errors = 0  # Reset error count
 
             # Save to file if specified
             if args.output:
@@ -120,7 +120,7 @@ def run_rest_mode(args):
         except Exception as e:
             consecutive_errors += 1
             logger.error(f"Error in main loop ({consecutive_errors}): {e}")
-            # 连续错误时增加等待时间
+            # Increase wait time on consecutive errors
             wait_time = min(5 * consecutive_errors, 30)
             time.sleep(wait_time)
 

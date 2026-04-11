@@ -13,7 +13,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 项目根目录（基于模块位置，避免依赖 CWD）
+# Project root directory (based on module location, avoids dependency on CWD)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DATA_RAW_DIR = _PROJECT_ROOT / "data" / "raw"
 _DATA_PROCESSED_DIR = _PROJECT_ROOT / "data" / "processed"
@@ -22,7 +22,7 @@ _CONFIG_DIR = _PROJECT_ROOT / "config"
 
 
 def _safe_filename(name: str) -> str:
-    """只保留安全字符，防止路径遍历。"""
+    """Keep only safe characters to prevent path traversal."""
     return "".join(c for c in name if c.isalnum() or c in "._-")
 
 
@@ -204,12 +204,12 @@ class DataCache:
             self.cache[key] = {"value": value, "expires": datetime.now().timestamp() + ttl}
 
     def _evict(self):
-        """淘汰缓存条目：优先移除已过期的，否则逐步移除最早到期的直到低于上限。"""
+        """Evict cache entries: prefer removing expired ones, otherwise progressively remove earliest-expiring entries until below limit."""
         now = datetime.now().timestamp()
         expired_keys = [k for k, v in self.cache.items() if v["expires"] <= now]
         for k in expired_keys:
             del self.cache[k]
-        # 逐步移除最早到期的条目直到低于上限
+        # Progressively remove earliest-expiring entries until below limit
         while len(self.cache) >= self.max_size and self.cache:
             oldest_key = min(self.cache, key=lambda k: self.cache[k]["expires"])
             del self.cache[oldest_key]

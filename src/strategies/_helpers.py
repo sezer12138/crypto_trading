@@ -1,8 +1,8 @@
 """
-策略辅助函数
+Strategy Helper Functions
 
-提供策略中常用的共享计算逻辑，避免代码重复。
-包括: 信号前向填充、交叉检测、RSI 计算等。
+Provides shared computation logic commonly used in strategies to avoid code duplication.
+Includes: signal forward fill, crossover detection, RSI calculation, etc.
 """
 
 import numpy as np
@@ -12,17 +12,17 @@ from strategies.constants import DEFAULT_RSI_PERIOD
 
 def forward_fill_position(df: pd.DataFrame) -> pd.DataFrame:
     """
-    根据信号列生成持仓状态列
+    Generate position state column based on signal column
 
-    将 signal 列中的 0 值向前填充，表示在没有新信号时维持当前持仓。
-    即：买入信号后持续持仓，直到出现卖出信号。
+    Forward fills 0 values in the signal column, representing maintaining the current position when no new signal occurs.
+    i.e., hold position after a buy signal until a sell signal appears.
 
     Args:
-        df: 包含 'signal' 列的 DataFrame
+        df: DataFrame containing a 'signal' column
 
     Returns:
-        添加了 'position' 列的 DataFrame。
-        position 值: 1=持仓中, 0=空仓, -1=卖出(瞬间)
+        DataFrame with a 'position' column added.
+        position values: 1=In position, 0=No position, -1=Sell (instantaneous)
 
     Example:
         >>> df['signal'] = [0, 1, 0, 0, -1, 0]
@@ -40,19 +40,19 @@ def detect_crossover(
     slow_col: str,
 ) -> pd.DataFrame:
     """
-    检测两列之间的交叉信号（金叉/死叉）
+    Detect crossover signals between two columns (Golden Cross / Death Cross)
 
-    金叉：fast_col 从下方穿过 slow_col（上穿），产生买入信号。
-    死叉：fast_col 从上方穿过 slow_col（下穿），产生卖出信号。
+    Golden Cross: fast_col crosses above slow_col from below, generating a buy signal.
+    Death Cross: fast_col crosses below slow_col from above, generating a sell signal.
 
     Args:
-        df: 包含两列数据的 DataFrame
-        fast_col: 快线列名（如 'ma_short', 'macd'）
-        slow_col: 慢线列名（如 'ma_long', 'macd_signal'）
+        df: DataFrame containing the two data columns
+        fast_col: Fast line column name (e.g., 'ma_short', 'macd')
+        slow_col: Slow line column name (e.g., 'ma_long', 'macd_signal')
 
     Returns:
-        添加了 'signal' 列的 DataFrame
-        signal: 1=金叉(买入), -1=死叉(卖出), 0=无信号
+        DataFrame with a 'signal' column added
+        signal: 1=Golden Cross (Buy), -1=Death Cross (Sell), 0=No signal
 
     Example:
         >>> df = detect_crossover(df, 'ma_short', 'ma_long')
@@ -60,13 +60,13 @@ def detect_crossover(
     """
     df["signal"] = 0
 
-    # 金叉：快线上穿慢线
+    # Golden Cross: fast line crosses above slow line
     df.loc[
         (df[fast_col] > df[slow_col]) & (df[fast_col].shift(1) <= df[slow_col].shift(1)),
         "signal",
     ] = 1
 
-    # 死叉：快线下穿慢线
+    # Death Cross: fast line crosses below slow line
     df.loc[
         (df[fast_col] < df[slow_col]) & (df[fast_col].shift(1) >= df[slow_col].shift(1)),
         "signal",
@@ -77,29 +77,29 @@ def detect_crossover(
 
 def calculate_rsi(prices: pd.Series, period: int = DEFAULT_RSI_PERIOD) -> pd.Series:
     """
-    计算相对强弱指标 (RSI)
+    Calculate Relative Strength Index (RSI)
 
-    RSI 衡量价格变动的速度和幅度，范围 0-100。
-    通常 RSI > 70 视为超买，RSI < 30 视为超卖。
+    RSI measures the speed and magnitude of price changes, ranging from 0 to 100.
+    Typically RSI > 70 is considered overbought, RSI < 30 is considered oversold.
 
-    计算步骤:
-        1. 计算价格变动 (delta)
-        2. 分离上涨 (gain) 和下跌 (loss)
-        3. 计算平均涨跌幅 (滚动均值)
-        4. RS = 平均涨幅 / 平均跌幅
+    Calculation steps:
+        1. Calculate price changes (delta)
+        2. Separate gains and losses
+        3. Calculate average gain/loss (rolling mean)
+        4. RS = Average gain / Average loss
         5. RSI = 100 - 100/(1+RS)
 
     Args:
-        prices: 价格序列 (通常为收盘价)
-        period: RSI 计算周期 (默认 14)
+        prices: Price series (typically closing prices)
+        period: RSI calculation period (default 14)
 
     Returns:
-        RSI 值序列，范围 [0, 100]，前 period-1 个值为 NaN
+        RSI value series, range [0, 100], first period-1 values are NaN
     """
     delta = prices.diff()
     gain = delta.clip(lower=0).rolling(window=period).mean()
     loss = (-delta.clip(upper=0)).rolling(window=period).mean()
-    # 防止除零: loss 为 0 时 RSI 为 100（全涨）
+    # Division-by-zero guard: when loss is 0, RSI is 100 (all gains)
     rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
     rsi = rsi.fillna(100)

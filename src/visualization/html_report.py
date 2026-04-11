@@ -1,7 +1,7 @@
 """
-HTML 报告生成器
+HTML Report Generator
 
-生成完整的回测 HTML 报告，包含策略详情、交易记录、收益分析和总结结论。
+Generates complete backtest HTML reports with strategy details, trade records, return analysis, and summary conclusions.
 """
 
 import base64
@@ -15,132 +15,132 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-# 策略描述信息
+# Strategy descriptions
 STRATEGY_DESCRIPTIONS = {
     "ma_cross": {
-        "name": "双均线交叉策略",
+        "name": "Moving Average Cross",
         "name_en": "Moving Average Cross",
-        "type": "趋势跟踪",
-        "description": "基于短期均线上穿/下穿长期均线产生买卖信号。当短期均线上穿长期均线时买入，下穿时卖出。",
-        "params": ["short_window (短期均线周期)", "long_window (长期均线周期)"],
-        "suitable_market": "趋势明显的市场",
-        "risk_level": "中等",
+        "type": "Trend Following",
+        "description": "Generates buy/sell signals based on the short-term moving average crossing above/below the long-term moving average. Buys when the short MA crosses above the long MA, sells when it crosses below.",
+        "params": ["short_window (Short MA period)", "long_window (Long MA period)"],
+        "suitable_market": "Markets with clear trends",
+        "risk_level": "Medium",
     },
     "rsi": {
-        "name": "RSI 超买超卖策略",
+        "name": "RSI Overbought/Oversold",
         "name_en": "RSI Overbought/Oversold",
-        "type": "均值回归",
-        "description": "基于 RSI 指标判断超买超卖区域。RSI 低于超卖阈值时买入，高于超买阈值时卖出。",
-        "params": ["period (RSI 周期)", "oversold (超卖阈值)", "overbought (超买阈值)"],
-        "suitable_market": "震荡市场",
-        "risk_level": "中等",
+        "type": "Mean Reversion",
+        "description": "Uses the RSI indicator to identify overbought and oversold zones. Buys when RSI falls below the oversold threshold, sells when it rises above the overbought threshold.",
+        "params": ["period (RSI period)", "oversold (Oversold threshold)", "overbought (Overbought threshold)"],
+        "suitable_market": "Range-bound markets",
+        "risk_level": "Medium",
     },
     "bollinger": {
-        "name": "布林带策略",
+        "name": "Bollinger Bands",
         "name_en": "Bollinger Bands",
-        "type": "均值回归",
-        "description": "利用布林带上下轨判断价格偏离程度。价格触及下轨买入，触及上轨卖出。",
-        "params": ["window (移动窗口)", "num_std (标准差倍数)"],
-        "suitable_market": "震荡市场",
-        "risk_level": "中等",
+        "type": "Mean Reversion",
+        "description": "Uses Bollinger Band upper and lower bands to gauge price deviation. Buys when price touches the lower band, sells when it touches the upper band.",
+        "params": ["window (Moving window)", "num_std (Standard deviation multiplier)"],
+        "suitable_market": "Range-bound markets",
+        "risk_level": "Medium",
     },
     "multi_factor": {
-        "name": "多因子组合策略",
+        "name": "Multi-Factor Strategy",
         "name_en": "Multi-Factor Strategy",
-        "type": "综合策略",
-        "description": "结合均线趋势、RSI、成交量和波动率多个因子，通过加权评分生成信号。",
+        "type": "Comprehensive Strategy",
+        "description": "Combines multiple factors including MA trend, RSI, volume, and volatility, generating signals through weighted scoring.",
         "params": ["ma_short", "ma_long", "rsi_period", "volume_threshold"],
-        "suitable_market": "多种市场环境",
-        "risk_level": "中等",
+        "suitable_market": "Various market conditions",
+        "risk_level": "Medium",
     },
     "mean_reversion": {
-        "name": "均值回归策略",
+        "name": "Mean Reversion",
         "name_en": "Mean Reversion",
-        "type": "统计套利",
-        "description": "基于价格偏离均值的程度进行反向操作。价格大幅偏离均值时预期回归。",
-        "params": ["window (窗口期)", "entry_z (入场 Z 分数)", "exit_z (出场 Z 分数)"],
-        "suitable_market": "震荡市场",
-        "risk_level": "中等偏高",
+        "type": "Statistical Arbitrage",
+        "description": "Takes contrarian positions based on the degree of price deviation from the mean. Expects reversion when price deviates significantly from the mean.",
+        "params": ["window (Window period)", "entry_z (Entry Z-score)", "exit_z (Exit Z-score)"],
+        "suitable_market": "Range-bound markets",
+        "risk_level": "Medium-High",
     },
     "macd": {
-        "name": "MACD 趋势策略",
+        "name": "MACD Strategy",
         "name_en": "MACD Strategy",
-        "type": "趋势跟踪",
-        "description": "基于 MACD 线与信号线的交叉产生买卖信号。MACD 上穿信号线买入，下穿卖出。",
-        "params": ["fast_period (快线周期)", "slow_period (慢线周期)", "signal_period (信号线周期)"],
-        "suitable_market": "趋势市场",
-        "risk_level": "中等",
+        "type": "Trend Following",
+        "description": "Generates buy/sell signals based on MACD line and signal line crossovers. Buys when MACD crosses above the signal line, sells when it crosses below.",
+        "params": ["fast_period (Fast line period)", "slow_period (Slow line period)", "signal_period (Signal line period)"],
+        "suitable_market": "Trending markets",
+        "risk_level": "Medium",
     },
     "breakout": {
-        "name": "突破策略",
+        "name": "Breakout Strategy",
         "name_en": "Breakout Strategy",
-        "type": "趋势跟踪",
-        "description": "当价格突破 N 周期最高价时买入，突破 N 周期最低价时卖出。",
-        "params": ["window (突破窗口)", "confirmation (是否确认突破)"],
-        "suitable_market": "趋势启动阶段",
-        "risk_level": "中等偏高",
+        "type": "Trend Following",
+        "description": "Buys when price breaks above the N-period high, sells when it breaks below the N-period low.",
+        "params": ["window (Breakout window)", "confirmation (Whether to confirm breakout)"],
+        "suitable_market": "Trend initiation phase",
+        "risk_level": "Medium-High",
     },
     "vwap": {
-        "name": "VWAP 均值回归策略",
+        "name": "VWAP Strategy",
         "name_en": "VWAP Strategy",
-        "type": "均值回归",
-        "description": "利用成交量加权平均价格判断价格偏离。价格低于 VWAP 买入，高于 VWAP 卖出。",
-        "params": ["window (VWAP 窗口)", "deviation (偏离阈值)"],
-        "suitable_market": "日内交易/震荡市场",
-        "risk_level": "中等",
+        "type": "Mean Reversion",
+        "description": "Uses Volume Weighted Average Price to gauge price deviation. Buys when price is below VWAP, sells when above VWAP.",
+        "params": ["window (VWAP window)", "deviation (Deviation threshold)"],
+        "suitable_market": "Intraday/Range-bound markets",
+        "risk_level": "Medium",
     },
     "momentum": {
-        "name": "动量策略",
+        "name": "Momentum Strategy",
         "name_en": "Momentum Strategy",
-        "type": "趋势跟踪",
-        "description": "基于价格变化率 (ROC) 和动量指标判断趋势强度，顺势交易。",
-        "params": ["roc_period (ROC 周期)", "momentum_period (动量周期)", "threshold (阈值)"],
-        "suitable_market": "趋势市场",
-        "risk_level": "中等",
+        "type": "Trend Following",
+        "description": "Uses Rate of Change (ROC) and momentum indicators to assess trend strength and trade in the direction of the trend.",
+        "params": ["roc_period (ROC period)", "momentum_period (Momentum period)", "threshold (Threshold)"],
+        "suitable_market": "Trending markets",
+        "risk_level": "Medium",
     },
     "atr_stop": {
-        "name": "ATR 动态止损策略",
+        "name": "ATR Stop Loss Strategy",
         "name_en": "ATR Stop Loss Strategy",
-        "type": "趋势跟踪",
-        "description": "利用 ATR 计算动态止损位，在保护利润的同时让利润奔跑。",
-        "params": ["atr_period (ATR 周期)", "multiplier (ATR 倍数)", "trend_ma (趋势均线)"],
-        "suitable_market": "趋势市场",
-        "risk_level": "中等",
+        "type": "Trend Following",
+        "description": "Uses ATR to calculate dynamic stop loss levels, protecting profits while allowing them to grow.",
+        "params": ["atr_period (ATR period)", "multiplier (ATR multiplier)", "trend_ma (Trend MA)"],
+        "suitable_market": "Trending markets",
+        "risk_level": "Medium",
     },
     "stochastic": {
-        "name": "随机指标策略",
+        "name": "Stochastic Strategy",
         "name_en": "Stochastic Strategy",
-        "type": "均值回归",
-        "description": "利用 K 线和 D 线的交叉以及超买超卖区域产生信号。",
-        "params": ["k_period (K 周期)", "d_period (D 周期)"],
-        "suitable_market": "震荡市场",
-        "risk_level": "中等",
+        "type": "Mean Reversion",
+        "description": "Generates signals using K-line and D-line crossovers along with overbought and oversold zones.",
+        "params": ["k_period (K period)", "d_period (D period)"],
+        "suitable_market": "Range-bound markets",
+        "risk_level": "Medium",
     },
     "grid": {
-        "name": "网格交易策略",
+        "name": "Grid Trading Strategy",
         "name_en": "Grid Trading Strategy",
-        "type": "震荡套利",
-        "description": "在预设价格区间内设置多个买卖网格，低买高卖赚取差价。",
-        "params": ["lower_price (下限)", "upper_price (上限)", "grid_num (网格数)", "amount_per_grid (每格数量)"],
-        "suitable_market": "震荡市场",
-        "risk_level": "中等偏高（单边行情风险大）",
+        "type": "Range Arbitrage",
+        "description": "Sets up multiple buy/sell grids within a predefined price range, buying low and selling high to capture spreads.",
+        "params": ["lower_price (Lower bound)", "upper_price (Upper bound)", "grid_num (Number of grids)", "amount_per_grid (Amount per grid)"],
+        "suitable_market": "Range-bound markets",
+        "risk_level": "Medium-High (high risk in trending markets)",
     },
     "martingale": {
-        "name": "马丁格尔策略",
+        "name": "Martingale Strategy",
         "name_en": "Martingale Strategy",
-        "type": "高风险博弈",
-        "description": "亏损后加倍下注，直到获利后回到初始下注额。⚠️ 高风险策略，需要充足资金。",
-        "params": ["base_amount (基础仓位)", "multiplier (倍数)", "max_steps (最大步数)", "target_profit (目标利润)", "stop_loss (止损)"],
-        "suitable_market": "仅用于测试，不建议实盘",
-        "risk_level": "极高 ⚠️",
+        "type": "High-Risk Gambling",
+        "description": "Doubles the bet after each loss, returning to the initial bet after a win. ⚠️ High-risk strategy requiring sufficient capital.",
+        "params": ["base_amount (Base position)", "multiplier (Multiplier)", "max_steps (Maximum steps)", "target_profit (Target profit)", "stop_loss (Stop loss)"],
+        "suitable_market": "Testing only, not recommended for live trading",
+        "risk_level": "Very High ⚠️",
     },
 }
 
 
 class HTMLReportGenerator:
-    """HTML 报告生成器"""
+    """HTML Report Generator"""
 
-    # 共享 CSS 样式（单策略和对比报告共用）
+    # Shared CSS styles (used by both single-strategy and comparison reports)
     _SHARED_CSS = """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -203,25 +203,25 @@ class HTMLReportGenerator:
         chart_paths: Optional[Dict[str, str]] = None,
     ) -> str:
         """
-        生成单策略回测 HTML 报告
+        Generate single-strategy backtest HTML report
 
         Args:
-            result: BacktestResult 对象
-            df: 价格数据
-            strategy_name: 策略名称
-            coin: 币种
-            days: 回测天数
-            interval: 时间粒度
-            capital: 初始资金
-            output_path: 输出路径
-            chart_paths: 图表路径字典
+            result: BacktestResult object
+            df: Price data
+            strategy_name: Strategy name
+            coin: Coin symbol
+            days: Backtest days
+            interval: Time interval
+            capital: Initial capital
+            output_path: Output path
+            chart_paths: Chart path dictionary
 
         Returns:
-            生成的 HTML 文件路径
+            Generated HTML file path
         """
         strategy_info = STRATEGY_DESCRIPTIONS.get(strategy_name, {})
 
-        # 读取图表并转为 base64
+        # Read charts and convert to base64
         charts_base64 = {}
         if chart_paths:
             for name, path in chart_paths.items():
@@ -240,14 +240,14 @@ class HTMLReportGenerator:
             charts_base64=charts_base64,
         )
 
-        # 保存 HTML 文件
+        # Save HTML file
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(html_content)
 
-        logger.info(f"📄 HTML 报告已生成: {output_file}")
+        logger.info(f"📄 HTML report generated: {output_file}")
         return str(output_file)
 
     def generate_comparison_report(
@@ -261,21 +261,21 @@ class HTMLReportGenerator:
         chart_paths: Optional[Dict[str, str]] = None,
     ) -> str:
         """
-        生成多策略对比 HTML 报告
+        Generate multi-strategy comparison HTML report
 
         Args:
-            results: 策略结果字典
-            coin: 币种
-            days: 回测天数
-            interval: 时间粒度
-            capital: 初始资金
-            output_path: 输出路径
-            chart_paths: 图表路径字典
+            results: Strategy results dictionary
+            coin: Coin symbol
+            days: Backtest days
+            interval: Time interval
+            capital: Initial capital
+            output_path: Output path
+            chart_paths: Chart path dictionary
 
         Returns:
-            生成的 HTML 文件路径
+            Generated HTML file path
         """
-        # 读取图表并转为 base64
+        # Read charts and convert to base64
         charts_base64 = {}
         if chart_paths:
             for name, path in chart_paths.items():
@@ -291,18 +291,18 @@ class HTMLReportGenerator:
             charts_base64=charts_base64,
         )
 
-        # 保存 HTML 文件
+        # Save HTML file
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(html_content)
 
-        logger.info(f"📄 HTML 对比报告已生成: {output_file}")
+        logger.info(f"📄 HTML comparison report generated: {output_file}")
         return str(output_file)
 
     def _image_to_base64(self, image_path: str) -> str:
-        """将图片转换为 base64 编码"""
+        """Convert image to base64 encoding"""
         with open(image_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
@@ -318,7 +318,7 @@ class HTMLReportGenerator:
         capital: float,
         charts_base64: Dict[str, str],
     ) -> str:
-        """生成单策略报告 HTML 内容"""
+        """Generate single-strategy report HTML content"""
         metrics = result.metrics
         trades = result.trades
         buy_trades = [t for t in trades if t.action == "buy"]
@@ -335,11 +335,11 @@ class HTMLReportGenerator:
         conclusion_html = self._build_conclusion_card(conclusion)
 
         html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>回测报告 - {strategy_name.upper()} - {coin.upper()}</title>
+    <title>Backtest Report - {strategy_name.upper()} - {coin.upper()}</title>
     <style>{self._SHARED_CSS}
         .strategy-info {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }}
         .info-item {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }}
@@ -353,9 +353,9 @@ class HTMLReportGenerator:
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 回测报告</h1>
-            <div class="subtitle">{strategy_info.get('name', strategy_name)} | {coin.upper()} | {days} 天 | {interval} 周期</div>
-            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">生成时间: {self.timestamp}</div>
+            <h1>📊 Backtest Report</h1>
+            <div class="subtitle">{strategy_info.get('name', strategy_name)} | {coin.upper()} | {days} Days | {interval} Interval</div>
+            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">Generated: {self.timestamp}</div>
         </div>
         {metrics_html}
         {strategy_html}
@@ -364,7 +364,7 @@ class HTMLReportGenerator:
         {trades_html}
         {conclusion_html}
         <div class="footer">
-            <p>⚠️ 免责声明：历史回测结果不代表未来收益，投资有风险，入市需谨慎。</p>
+            <p>⚠️ Disclaimer: Historical backtest results do not guarantee future returns. Trading involves risk, proceed with caution.</p>
             <p style="margin-top: 10px;">Generated by Crypto Trading Backtest System | {self.timestamp}</p>
         </div>
     </div>
@@ -373,99 +373,99 @@ class HTMLReportGenerator:
         return html
 
     def _build_metrics_card(self, metrics: Dict) -> str:
-        """构建核心指标卡片"""
+        """Build core metrics card"""
         m = metrics
         return f"""
         <div class="card">
-            <h2>核心绩效指标</h2>
+            <h2>Key Performance Metrics</h2>
             <div class="metrics-grid">
                 <div class="metric-item">
                     <div class="metric-value {'positive' if m.get('total_return_pct', 0) >= 0 else 'negative'}">{m.get('total_return_pct', 0):.2f}%</div>
-                    <div class="metric-label">总收益率</div>
+                    <div class="metric-label">Total Return</div>
                 </div>
                 <div class="metric-item">
                     <div class="metric-value {'positive' if m.get('annual_return_pct', 0) >= 0 else 'negative'}">{m.get('annual_return_pct', 0):.2f}%</div>
-                    <div class="metric-label">年化收益率</div>
+                    <div class="metric-label">Annualized Return</div>
                 </div>
                 <div class="metric-item">
                     <div class="metric-value neutral">{m.get('sharpe_ratio', 0):.2f}</div>
-                    <div class="metric-label">夏普比率</div>
+                    <div class="metric-label">Sharpe Ratio</div>
                 </div>
                 <div class="metric-item">
                     <div class="metric-value negative">{m.get('max_drawdown_pct', 0):.2f}%</div>
-                    <div class="metric-label">最大回撤</div>
+                    <div class="metric-label">Max Drawdown</div>
                 </div>
                 <div class="metric-item">
                     <div class="metric-value neutral">{m.get('win_rate_pct', 0):.2f}%</div>
-                    <div class="metric-label">胜率</div>
+                    <div class="metric-label">Win Rate</div>
                 </div>
                 <div class="metric-item">
                     <div class="metric-value neutral">{m.get('total_trades', 0)}</div>
-                    <div class="metric-label">总交易次数</div>
+                    <div class="metric-label">Total Trades</div>
                 </div>
             </div>
         </div>"""
 
     def _build_strategy_info_card(self, strategy_info: Dict, strategy_name: str, coin: str, days: int, interval: str, capital: float) -> str:
-        """构建策略详情卡片"""
+        """Build strategy details card"""
         si = strategy_info
         return f"""
         <div class="card">
-            <h2>策略详情</h2>
+            <h2>Strategy Details</h2>
             <div class="strategy-info">
-                <div class="info-item"><span class="info-label">策略名称</span><span class="info-value">{si.get('name', strategy_name)}</span></div>
-                <div class="info-item"><span class="info-label">英文名称</span><span class="info-value">{si.get('name_en', strategy_name)}</span></div>
-                <div class="info-item"><span class="info-label">策略类型</span><span class="info-value">{si.get('type', 'N/A')}</span></div>
-                <div class="info-item"><span class="info-label">风险等级</span><span class="info-value">{si.get('risk_level', 'N/A')}</span></div>
-                <div class="info-item"><span class="info-label">适用市场</span><span class="info-value">{si.get('suitable_market', 'N/A')}</span></div>
-                <div class="info-item"><span class="info-label">回测币种</span><span class="info-value">{coin.upper()}</span></div>
-                <div class="info-item"><span class="info-label">回测天数</span><span class="info-value">{days} 天</span></div>
-                <div class="info-item"><span class="info-label">K线周期</span><span class="info-value">{interval}</span></div>
-                <div class="info-item"><span class="info-label">初始资金</span><span class="info-value">${capital:,.2f}</span></div>
+                <div class="info-item"><span class="info-label">Strategy Name</span><span class="info-value">{si.get('name', strategy_name)}</span></div>
+                <div class="info-item"><span class="info-label">English Name</span><span class="info-value">{si.get('name_en', strategy_name)}</span></div>
+                <div class="info-item"><span class="info-label">Strategy Type</span><span class="info-value">{si.get('type', 'N/A')}</span></div>
+                <div class="info-item"><span class="info-label">Risk Level</span><span class="info-value">{si.get('risk_level', 'N/A')}</span></div>
+                <div class="info-item"><span class="info-label">Suitable Market</span><span class="info-value">{si.get('suitable_market', 'N/A')}</span></div>
+                <div class="info-item"><span class="info-label">Backtest Coin</span><span class="info-value">{coin.upper()}</span></div>
+                <div class="info-item"><span class="info-label">Backtest Days</span><span class="info-value">{days} Days</span></div>
+                <div class="info-item"><span class="info-label">K-Line Interval</span><span class="info-value">{interval}</span></div>
+                <div class="info-item"><span class="info-label">Initial Capital</span><span class="info-value">${capital:,.2f}</span></div>
             </div>
             <div style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px;">
-                <strong style="color: #00d9ff;">策略描述：</strong>
-                <p style="margin-top: 10px; color: #ccc; line-height: 1.6;">{si.get('description', '暂无描述')}</p>
+                <strong style="color: #00d9ff;">Strategy Description:</strong>
+                <p style="margin-top: 10px; color: #ccc; line-height: 1.6;">{si.get('description', 'No description available')}</p>
             </div>
         </div>"""
 
     def _build_trade_stats_card(self, metrics: Dict, buy_trades: List, sell_trades: List, avg_holding_time: str, max_profit: float, max_loss: float, result: Any) -> str:
-        """构建交易统计卡片"""
+        """Build trade statistics card"""
         m = metrics
         return f"""
         <div class="card">
-            <h2>交易统计</h2>
+            <h2>Trade Statistics</h2>
             <div class="summary-stats">
-                <div class="summary-stat"><div class="value">{len(buy_trades)}</div><div class="label">买入次数</div></div>
-                <div class="summary-stat"><div class="value">{len(sell_trades)}</div><div class="label">卖出次数</div></div>
-                <div class="summary-stat"><div class="value">{avg_holding_time}</div><div class="label">平均持仓时间</div></div>
-                <div class="summary-stat"><div class="value" style="color: #00ff88;">+{max_profit:.2f}%</div><div class="label">最大单笔盈利</div></div>
-                <div class="summary-stat"><div class="value" style="color: #ff4757;">{max_loss:.2f}%</div><div class="label">最大单笔亏损</div></div>
-                <div class="summary-stat"><div class="value">{m.get('trades_per_month', 0):.1f}</div><div class="label">月均交易次数</div></div>
-                <div class="summary-stat"><div class="value">{m.get('volatility_pct', 0):.2f}%</div><div class="label">年化波动率</div></div>
-                <div class="summary-stat"><div class="value">${result.equity_curve.iloc[-1]:,.2f}</div><div class="label">最终资产</div></div>
+                <div class="summary-stat"><div class="value">{len(buy_trades)}</div><div class="label">Buy Count</div></div>
+                <div class="summary-stat"><div class="value">{len(sell_trades)}</div><div class="label">Sell Count</div></div>
+                <div class="summary-stat"><div class="value">{avg_holding_time}</div><div class="label">Avg Holding Time</div></div>
+                <div class="summary-stat"><div class="value" style="color: #00ff88;">+{max_profit:.2f}%</div><div class="label">Max Single Profit</div></div>
+                <div class="summary-stat"><div class="value" style="color: #ff4757;">{max_loss:.2f}%</div><div class="label">Max Single Loss</div></div>
+                <div class="summary-stat"><div class="value">{m.get('trades_per_month', 0):.1f}</div><div class="label">Monthly Avg Trades</div></div>
+                <div class="summary-stat"><div class="value">{m.get('volatility_pct', 0):.2f}%</div><div class="label">Annualized Volatility</div></div>
+                <div class="summary-stat"><div class="value">${result.equity_curve.iloc[-1]:,.2f}</div><div class="label">Final Equity</div></div>
             </div>
         </div>"""
 
     def _build_trades_card(self, trades: List) -> str:
-        """构建交易记录卡片"""
+        """Build trade records card"""
         return f"""
         <div class="card">
-            <h2>交易记录详情</h2>
+            <h2>Trade Records</h2>
             <div style="overflow-x: auto;">
                 <table>
-                    <thead><tr><th>#</th><th>时间</th><th>操作</th><th>价格</th><th>数量</th><th>金额</th></tr></thead>
+                    <thead><tr><th>#</th><th>Time</th><th>Action</th><th>Price</th><th>Quantity</th><th>Amount</th></tr></thead>
                     <tbody>{self._generate_trades_table(trades)}</tbody>
                 </table>
             </div>
         </div>"""
 
     def _build_conclusion_card(self, conclusion: str) -> str:
-        """构建结论卡片"""
+        """Build conclusion card"""
         return f"""
         <div class="card">
-            <h2>总结与结论</h2>
-            <div class="conclusion"><h3>📈 回测分析结论</h3>{conclusion}</div>
+            <h2>Summary & Conclusions</h2>
+            <div class="conclusion"><h3>📈 Backtest Analysis Conclusions</h3>{conclusion}</div>
         </div>"""
 
     def _generate_comparison_html(
@@ -477,7 +477,7 @@ class HTMLReportGenerator:
         capital: float,
         charts_base64: Dict[str, str],
     ) -> str:
-        """生成多策略对比报告 HTML 内容"""
+        """Generate multi-strategy comparison report HTML content"""
         sorted_results = sorted(results.items(), key=lambda x: x[1].metrics.get("sharpe_ratio", 0), reverse=True)
         best_strategy = sorted_results[0][0] if sorted_results else "N/A"
         best_metrics = sorted_results[0][1].metrics if sorted_results else {}
@@ -492,11 +492,11 @@ class HTMLReportGenerator:
         conclusion_html = self._build_conclusion_card(conclusion)
 
         html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>策略对比报告 - {coin.upper()}</title>
+    <title>Strategy Comparison Report - {coin.upper()}</title>
     <style>{self._SHARED_CSS}
         .container {{ max-width: 1400px; margin: 0 auto; }}
         th, td {{ text-align: center; }}
@@ -535,9 +535,9 @@ class HTMLReportGenerator:
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 策略对比报告</h1>
-            <div class="subtitle">{coin.upper()} | {days} 天 | {interval} 周期 | {len(results)} 个策略</div>
-            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">生成时间: {self.timestamp}</div>
+            <h1>📊 Strategy Comparison Report</h1>
+            <div class="subtitle">{coin.upper()} | {days} Days | {interval} Interval | {len(results)} Strategies</div>
+            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">Generated: {self.timestamp}</div>
         </div>
         {best_html}
         {table_html}
@@ -545,7 +545,7 @@ class HTMLReportGenerator:
         {cards_html}
         {conclusion_html}
         <div class="footer">
-            <p>⚠️ 免责声明：历史回测结果不代表未来收益，投资有风险，入市需谨慎。</p>
+            <p>⚠️ Disclaimer: Historical backtest results do not guarantee future returns. Trading involves risk, proceed with caution.</p>
             <p style="margin-top: 10px;">Generated by Crypto Trading Backtest System | {self.timestamp}</p>
         </div>
     </div>
@@ -554,52 +554,52 @@ class HTMLReportGenerator:
         return html
 
     def _build_best_strategy_card(self, best_strategy: str, best_metrics: Dict) -> str:
-        """构建最佳策略卡片"""
+        """Build best strategy card"""
         bm = best_metrics
         return f"""
         <div class="card best-strategy">
-            <h3>🏆 最佳策略</h3>
+            <h3>🏆 Best Strategy</h3>
             <div class="name">{STRATEGY_DESCRIPTIONS.get(best_strategy, {}).get('name', best_strategy.upper())}</div>
             <div class="metrics">
-                <div class="metric"><div class="value">{'+' if bm.get('total_return_pct', 0) >= 0 else ''}{bm.get('total_return_pct', 0):.2f}%</div><div class="label">总收益率</div></div>
-                <div class="metric"><div class="value">{bm.get('sharpe_ratio', 0):.2f}</div><div class="label">夏普比率</div></div>
-                <div class="metric"><div class="value">{bm.get('win_rate_pct', 0):.2f}%</div><div class="label">胜率</div></div>
-                <div class="metric"><div class="value">{bm.get('max_drawdown_pct', 0):.2f}%</div><div class="label">最大回撤</div></div>
+                <div class="metric"><div class="value">{'+' if bm.get('total_return_pct', 0) >= 0 else ''}{bm.get('total_return_pct', 0):.2f}%</div><div class="label">Total Return</div></div>
+                <div class="metric"><div class="value">{bm.get('sharpe_ratio', 0):.2f}</div><div class="label">Sharpe Ratio</div></div>
+                <div class="metric"><div class="value">{bm.get('win_rate_pct', 0):.2f}%</div><div class="label">Win Rate</div></div>
+                <div class="metric"><div class="value">{bm.get('max_drawdown_pct', 0):.2f}%</div><div class="label">Max Drawdown</div></div>
             </div>
         </div>"""
 
     def _build_comparison_table_card(self, comparison_table: str) -> str:
-        """构建对比排名表格卡片"""
+        """Build comparison ranking table card"""
         return f"""
         <div class="card">
-            <h2>策略排名对比</h2>
+            <h2>Strategy Ranking Comparison</h2>
             <div style="overflow-x: auto;">
                 <table>
-                    <thead><tr><th>排名</th><th>策略</th><th>总收益</th><th>年化收益</th><th>夏普比率</th><th>最大回撤</th><th>胜率</th><th>交易次数</th></tr></thead>
+                    <thead><tr><th>Rank</th><th>Strategy</th><th>Total Return</th><th>Annual Return</th><th>Sharpe Ratio</th><th>Max Drawdown</th><th>Win Rate</th><th>Trades</th></tr></thead>
                     <tbody>{comparison_table}</tbody>
                 </table>
             </div>
         </div>"""
 
     def _build_top_cards(self, strategy_cards: str) -> str:
-        """构建 Top5 策略详情卡片"""
+        """Build Top 5 strategy detail cards"""
         return f"""
         <div class="card">
-            <h2>Top 5 策略详情</h2>
+            <h2>Top 5 Strategy Details</h2>
             <div class="strategy-cards">{strategy_cards}</div>
         </div>"""
 
     def _generate_charts_html(self, charts_base64: Dict[str, str]) -> str:
-        """生成图表 HTML"""
+        """Generate charts HTML"""
         if not charts_base64:
             return ""
 
-        html_parts = ['<div class="card"><h2>可视化图表</h2>']
+        html_parts = ['<div class="card"><h2>Visualization Charts</h2>']
 
         chart_titles = {
-            "equity": "权益曲线与回撤分析",
-            "signals": "价格走势与交易信号",
-            "monthly": "月度收益热力图",
+            "equity": "Equity Curve & Drawdown Analysis",
+            "signals": "Price Trends & Trading Signals",
+            "monthly": "Monthly Returns Heatmap",
         }
 
         for name, base64_data in charts_base64.items():
@@ -615,16 +615,16 @@ class HTMLReportGenerator:
         return ''.join(html_parts)
 
     def _generate_comparison_charts_html(self, charts_base64: Dict[str, str]) -> str:
-        """生成对比图表 HTML"""
+        """Generate comparison charts HTML"""
         if not charts_base64:
             return ""
 
-        html_parts = ['<div class="card"><h2>策略对比图表</h2>']
+        html_parts = ['<div class="card"><h2>Strategy Comparison Charts</h2>']
 
         chart_titles = {
-            "metrics": "核心指标对比",
-            "ranking": "策略排名",
-            "equity": "权益曲线对比 (Top 5)",
+            "metrics": "Core Metrics Comparison",
+            "ranking": "Strategy Ranking",
+            "equity": "Equity Curve Comparison (Top 5)",
         }
 
         for name, base64_data in charts_base64.items():
@@ -640,11 +640,11 @@ class HTMLReportGenerator:
         return ''.join(html_parts)
 
     def _generate_trades_table(self, trades: List) -> str:
-        """生成交易记录表格 HTML"""
+        """Generate trade records table HTML"""
         rows = []
         for i, trade in enumerate(trades, 1):
             action_class = "buy" if trade.action == "buy" else "sell"
-            action_text = "买入 🟢" if trade.action == "buy" else "卖出 🔴"
+            action_text = "Buy 🟢" if trade.action == "buy" else "Sell 🔴"
             rows.append(f"""
                 <tr>
                     <td>{i}</td>
@@ -658,7 +658,7 @@ class HTMLReportGenerator:
         return ''.join(rows)
 
     def _generate_comparison_table(self, sorted_results: List) -> str:
-        """生成对比表格 HTML"""
+        """Generate comparison table HTML"""
         rows = []
         for rank, (name, result) in enumerate(sorted_results, 1):
             m = result.metrics
@@ -683,7 +683,7 @@ class HTMLReportGenerator:
         return ''.join(rows)
 
     def _generate_strategy_cards(self, top_results: List) -> str:
-        """生成策略卡片 HTML"""
+        """Generate strategy cards HTML"""
         cards = []
         for rank, (name, result) in enumerate(top_results, 1):
             m = result.metrics
@@ -702,19 +702,19 @@ class HTMLReportGenerator:
                     <div class="mini-metrics">
                         <div class="mini-metric">
                             <div class="value {return_class}">{m.get('total_return_pct', 0):.2f}%</div>
-                            <div class="label">总收益</div>
+                            <div class="label">Return</div>
                         </div>
                         <div class="mini-metric">
                             <div class="value neutral">{m.get('sharpe_ratio', 0):.2f}</div>
-                            <div class="label">夏普</div>
+                            <div class="label">Sharpe</div>
                         </div>
                         <div class="mini-metric">
                             <div class="value">{m.get('win_rate_pct', 0):.1f}%</div>
-                            <div class="label">胜率</div>
+                            <div class="label">Win Rate</div>
                         </div>
                         <div class="mini-metric">
                             <div class="value negative">{m.get('max_drawdown_pct', 0):.1f}%</div>
-                            <div class="label">回撤</div>
+                            <div class="label">Drawdown</div>
                         </div>
                     </div>
                 </div>
@@ -722,7 +722,7 @@ class HTMLReportGenerator:
         return ''.join(cards)
 
     def _calculate_avg_holding_time(self, trades: List) -> str:
-        """计算平均持仓时间 — O(n) 单次遍历"""
+        """Calculate average holding time -- O(n) single pass"""
         if len(trades) < 2:
             return "N/A"
 
@@ -740,12 +740,12 @@ class HTMLReportGenerator:
 
         avg_hours = sum(holding_times) / len(holding_times)
         if avg_hours >= 24:
-            return f"{avg_hours / 24:.1f} 天"
+            return f"{avg_hours / 24:.1f} days"
         else:
-            return f"{avg_hours:.1f} 小时"
+            return f"{avg_hours:.1f} hours"
 
     def _calculate_max_profit_loss(self, trades: List) -> tuple:
-        """计算最大单笔盈亏 — O(n) 单次遍历"""
+        """Calculate max single-trade profit and loss -- O(n) single pass"""
         max_profit = 0.0
         max_loss = 0.0
         last_buy_price = None
@@ -763,108 +763,108 @@ class HTMLReportGenerator:
         return max_profit, max_loss
 
     def _generate_conclusion(self, metrics: Dict, strategy_name: str) -> str:
-        """生成单策略结论"""
+        """Generate single-strategy conclusion"""
         total_return = metrics.get('total_return_pct', 0)
         sharpe = metrics.get('sharpe_ratio', 0)
         max_dd = metrics.get('max_drawdown_pct', 0)
         win_rate = metrics.get('win_rate_pct', 0)
 
         strategy_info = STRATEGY_DESCRIPTIONS.get(strategy_name, {})
-        strategy_cn_name = strategy_info.get('name', strategy_name)
+        strategy_display_name = strategy_info.get('name', strategy_name)
 
-        # 评价等级
+        # Rating levels
         if sharpe >= 2:
-            sharpe_eval = "优秀"
+            sharpe_eval = "Excellent"
             sharpe_class = "badge-success"
         elif sharpe >= 1:
-            sharpe_eval = "良好"
+            sharpe_eval = "Good"
             sharpe_class = "badge-success"
         elif sharpe >= 0:
-            sharpe_eval = "一般"
+            sharpe_eval = "Average"
             sharpe_class = "badge-warning"
         else:
-            sharpe_eval = "较差"
+            sharpe_eval = "Poor"
             sharpe_class = "badge-danger"
 
         conclusion = f"""
-        <p><strong>策略表现：</strong>
-        {strategy_cn_name} 在本次回测中{'实现盈利' if total_return >= 0 else '出现亏损'}，
-        总收益率为 <span class="{'positive' if total_return >= 0 else 'negative'}">{total_return:.2f}%</span>。
-        夏普比率为 <span class="neutral">{sharpe:.2f}</span>，风险调整后收益表现
-        <span class="badge {sharpe_class}">{sharpe_eval}</span>。
+        <p><strong>Strategy Performance:</strong>
+        {strategy_display_name} {'generated a profit' if total_return >= 0 else 'incurred a loss'} in this backtest,
+        with a total return of <span class="{'positive' if total_return >= 0 else 'negative'}">{total_return:.2f}%</span>.
+        The Sharpe ratio is <span class="neutral">{sharpe:.2f}</span>, and the risk-adjusted return is
+        <span class="badge {sharpe_class}">{sharpe_eval}</span>.
         </p>
 
-        <p style="margin-top: 15px;"><strong>风险分析：</strong>
-        最大回撤为 <span class="negative">{max_dd:.2f}%</span>，
-        {'风险控制较好' if max_dd > -15 else ('回撤幅度较大，建议关注风险控制' if max_dd > -25 else '回撤严重，风险较高')}。
-        胜率为 {win_rate:.2f}%，{'交易胜率较高' if win_rate >= 50 else '胜率偏低，需优化策略参数'}。
+        <p style="margin-top: 15px;"><strong>Risk Analysis:</strong>
+        The maximum drawdown is <span class="negative">{max_dd:.2f}%</span>,
+        {'indicating good risk control' if max_dd > -15 else ('indicating a relatively large drawdown; risk management improvements are recommended' if max_dd > -25 else 'indicating a severe drawdown with high risk')}.
+        The win rate is {win_rate:.2f}%, {'which is relatively high' if win_rate >= 50 else 'which is below average; strategy parameter optimization is recommended'}.
         </p>
 
-        <p style="margin-top: 15px;"><strong>投资建议：</strong>
+        <p style="margin-top: 15px;"><strong>Investment Advice:</strong>
         """
 
         if sharpe >= 1.5 and total_return > 0:
-            conclusion += "该策略在当前参数下表现良好，可考虑进一步优化参数或增加资金规模进行测试。"
+            conclusion += "This strategy performs well with current parameters. Consider further parameter optimization or testing with larger capital."
         elif sharpe >= 0 and total_return > 0:
-            conclusion += "该策略有一定盈利能力，但风险调整后收益一般，建议优化策略参数或结合其他策略使用。"
+            conclusion += "This strategy has some profitability, but the risk-adjusted return is average. Consider optimizing strategy parameters or combining with other strategies."
         else:
-            conclusion += "该策略在当前参数下表现不佳，建议调整策略参数或选择其他策略。"
+            conclusion += "This strategy underperforms with current parameters. Consider adjusting parameters or selecting a different strategy."
 
         conclusion += "</p>"
 
-        # 添加适用性说明
+        # Add applicability note
         suitable_market = strategy_info.get('suitable_market', 'N/A')
         conclusion += f"""
-        <p style="margin-top: 15px;"><strong>适用场景：</strong>
-        该策略适用于 {suitable_market}。请注意，历史回测结果不代表未来收益，实盘交易前请充分测试并做好风险管理。
+        <p style="margin-top: 15px;"><strong>Applicable Scenarios:</strong>
+        This strategy is suitable for {suitable_market}. Please note that historical backtest results do not guarantee future returns. Conduct thorough testing and implement proper risk management before live trading.
         </p>
         """
 
         return conclusion
 
     def _generate_comparison_conclusion(self, sorted_results: List, coin: str, days: int) -> str:
-        """生成多策略对比结论"""
+        """Generate multi-strategy comparison conclusion"""
         if not sorted_results:
-            return "<p>无有效回测结果</p>"
+            return "<p>No valid backtest results</p>"
 
         best_name, best_result = sorted_results[0]
         best_info = STRATEGY_DESCRIPTIONS.get(best_name, {})
         best_m = best_result.metrics
 
-        # 统计盈利策略数量
+        # Count profitable strategies
         profitable = sum(1 for _, r in sorted_results if r.metrics.get('total_return_pct', 0) > 0)
 
-        # 找出夏普比率最高的策略
+        # Find strategy with highest Sharpe ratio
         best_sharpe_name = best_name
         best_sharpe = best_m.get('sharpe_ratio', 0)
 
-        # 找出回撤最小的策略
+        # Find strategy with smallest drawdown
         min_dd_name, min_dd_result = min(sorted_results, key=lambda x: x[1].metrics.get('max_drawdown_pct', 0))
         min_dd = min_dd_result.metrics.get('max_drawdown_pct', 0)
 
         conclusion = f"""
-        <p><strong>整体表现：</strong>
-        在 {coin.upper()} 的 {days} 天回测中，共测试了 {len(sorted_results)} 个策略，
-        其中 <span class="positive">{profitable}</span> 个策略实现盈利，
-        {len(sorted_results) - profitable} 个策略出现亏损。
+        <p><strong>Overall Performance:</strong>
+        In the {days}-day backtest for {coin.upper()}, a total of {len(sorted_results)} strategies were tested,
+        of which <span class="positive">{profitable}</span> generated profits
+        and {len(sorted_results) - profitable} incurred losses.
         </p>
 
-        <p style="margin-top: 15px;"><strong>最佳策略：</strong>
-        <span class="positive">{best_info.get('name', best_name)}</span> 表现最优，
-        总收益率 {best_m.get('total_return_pct', 0):.2f}%，
-        夏普比率 {best_m.get('sharpe_ratio', 0):.2f}，
-        最大回撤 {best_m.get('max_drawdown_pct', 0):.2f}%。
+        <p style="margin-top: 15px;"><strong>Best Strategy:</strong>
+        <span class="positive">{best_info.get('name', best_name)}</span> performed the best,
+        with a total return of {best_m.get('total_return_pct', 0):.2f}%,
+        a Sharpe ratio of {best_m.get('sharpe_ratio', 0):.2f},
+        and a maximum drawdown of {best_m.get('max_drawdown_pct', 0):.2f}%.
         </p>
 
-        <p style="margin-top: 15px;"><strong>风险最低：</strong>
-        {STRATEGY_DESCRIPTIONS.get(min_dd_name, {}).get('name', min_dd_name)} 回撤控制最好，
-        最大回撤仅 {min_dd:.2f}%。
+        <p style="margin-top: 15px;"><strong>Lowest Risk:</strong>
+        {STRATEGY_DESCRIPTIONS.get(min_dd_name, {}).get('name', min_dd_name)} had the best drawdown control,
+        with a maximum drawdown of only {min_dd:.2f}%.
         </p>
 
-        <p style="margin-top: 15px;"><strong>策略类型分析：</strong>
+        <p style="margin-top: 15px;"><strong>Strategy Type Analysis:</strong>
         """
 
-        # 分析不同类型策略的表现
+        # Analyze performance by strategy type
         trend_strategies = ["ma_cross", "macd", "breakout", "momentum", "atr_stop"]
         mean_reversion_strategies = ["rsi", "bollinger", "mean_reversion", "vwap", "stochastic"]
 
@@ -872,22 +872,22 @@ class HTMLReportGenerator:
         mr_avg = sum(r.metrics.get('sharpe_ratio', 0) for n, r in sorted_results if n in mean_reversion_strategies) / max(len([n for n, _ in sorted_results if n in mean_reversion_strategies]), 1)
 
         if trend_avg > mr_avg:
-            conclusion += f"趋势跟踪类策略平均夏普比率 ({trend_avg:.2f}) 优于均值回归类 ({mr_avg:.2f})，当前市场可能更适合趋势策略。"
+            conclusion += f"Trend-following strategies have a higher average Sharpe ratio ({trend_avg:.2f}) than mean-reversion strategies ({mr_avg:.2f}), suggesting the current market may be more suitable for trend strategies."
         else:
-            conclusion += f"均值回归类策略平均夏普比率 ({mr_avg:.2f}) 优于趋势跟踪类 ({trend_avg:.2f})，当前市场可能更适合震荡策略。"
+            conclusion += f"Mean-reversion strategies have a higher average Sharpe ratio ({mr_avg:.2f}) than trend-following strategies ({trend_avg:.2f}), suggesting the current market may be more suitable for range-bound strategies."
 
         conclusion += "</p>"
 
         conclusion += f"""
-        <p style="margin-top: 15px;"><strong>投资建议：</strong>
-        建议优先考虑 {best_info.get('name', best_name)} 策略，同时可结合回撤控制较好的
-        {STRATEGY_DESCRIPTIONS.get(min_dd_name, {}).get('name', min_dd_name)} 进行组合配置，
-        以平衡收益与风险。
+        <p style="margin-top: 15px;"><strong>Investment Advice:</strong>
+        It is recommended to prioritize the {best_info.get('name', best_name)} strategy,
+        and consider combining it with {STRATEGY_DESCRIPTIONS.get(min_dd_name, {}).get('name', min_dd_name)}
+        which has better drawdown control for a balanced portfolio that manages both returns and risk.
         </p>
 
         <p style="margin-top: 15px; color: #ff4757;">
-        ⚠️ <strong>重要提示：</strong>历史回测结果不代表未来收益，市场环境变化可能导致策略表现差异。
-        实盘交易前请进行充分的模拟测试，并严格执行风险管理规则。
+        ⚠️ <strong>Important Notice:</strong> Historical backtest results do not guarantee future returns. Changes in market conditions may cause strategy performance to differ.
+        Please conduct thorough simulated testing before live trading and strictly follow risk management rules.
         </p>
         """
 

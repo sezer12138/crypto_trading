@@ -1,39 +1,39 @@
 """
-可视化参数常量
+Visualization Parameter Constants
 
-集中定义所有可视化相关的默认参数值。
+Centralized definition of all visualization-related default parameter values.
 """
 
 # ============================================================
-# 图表基础设置
+# Chart Base Settings
 # ============================================================
-DEFAULT_FIG_DPI = 300                   # 图表保存分辨率
-DEFAULT_STYLE = "seaborn-v0_8"         # 默认 matplotlib 样式
+DEFAULT_FIG_DPI = 300                   # Chart save resolution
+DEFAULT_STYLE = "seaborn-v0_8"         # Default matplotlib style
 
 # ============================================================
-# 图表尺寸
+# Chart Sizes
 # ============================================================
-DEFAULT_EQUITY_FIGSIZE = (14, 10)       # 权益曲线图尺寸
-DEFAULT_PRICE_FIGSIZE = (14, 8)         # 价格信号图尺寸
-DEFAULT_MONTHLY_FIGSIZE = (12, 7)       # 月度收益图尺寸
-DEFAULT_COMPARISON_FIGSIZE = (18, 10)   # 策略对比图尺寸
-DEFAULT_RANKING_FIGSIZE_BASE = (10, 6)  # 排名图基础尺寸
-DEFAULT_EQUITY_COMPARISON_FIGSIZE = (14, 8)  # 权益对比图尺寸
+DEFAULT_EQUITY_FIGSIZE = (14, 10)       # Equity curve chart size
+DEFAULT_PRICE_FIGSIZE = (14, 8)         # Price signal chart size
+DEFAULT_MONTHLY_FIGSIZE = (12, 7)       # Monthly returns chart size
+DEFAULT_COMPARISON_FIGSIZE = (18, 10)   # Strategy comparison chart size
+DEFAULT_RANKING_FIGSIZE_BASE = (10, 6)  # Ranking chart base size
+DEFAULT_EQUITY_COMPARISON_FIGSIZE = (14, 8)  # Equity comparison chart size
 
 # ============================================================
-# 子图比例
+# Subplot Ratios
 # ============================================================
-PRICE_HEIGHT_RATIO = 3                  # 价格子图与量子图的高度比
+PRICE_HEIGHT_RATIO = 3                  # Price subplot to volume subplot height ratio
 
 # ============================================================
-# 月度收益热力图
+# Monthly Returns Heatmap
 # ============================================================
-MONTHLY_RETURN_VMIN = -20               # 热力图颜色最小值 (%)
-MONTHLY_RETURN_VMAX = 20                # 热力图颜色最大值 (%)
-COLOR_TEXT_THRESHOLD = 10               # 文字颜色切换阈值 (白色/黑色)
+MONTHLY_RETURN_VMIN = -20               # Heatmap color minimum value (%)
+MONTHLY_RETURN_VMAX = 20                # Heatmap color maximum value (%)
+COLOR_TEXT_THRESHOLD = 10               # Text color switch threshold (white/black)
 
 # ============================================================
-# 策略对比
+# Strategy Comparison
 # ============================================================
-DEFAULT_TOP_N_COMPARISON = 6            # 对比图默认显示策略数
-DEFAULT_TOP_N_EQUITY = 5                # 权益曲线对比默认显示数
+DEFAULT_TOP_N_COMPARISON = 6            # Default number of strategies shown in comparison chart
+DEFAULT_TOP_N_EQUITY = 5                # Default number of strategies shown in equity comparison

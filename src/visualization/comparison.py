@@ -1,7 +1,7 @@
 """
-策略对比可视化
+Strategy Comparison Visualization
 
-提供多策略性能对比的图表，包括指标对比、排名和权益曲线对比。
+Provides multi-strategy performance comparison charts, including metrics comparison, ranking, and equity curve comparison.
 """
 
 from typing import Dict, Optional
@@ -19,7 +19,7 @@ from visualization._constants import (
 
 
 class ComparisonMixin:
-    """策略对比绘图方法"""
+    """Strategy comparison plotting methods"""
 
     def plot_metrics_comparison(
         self,
@@ -29,22 +29,22 @@ class ComparisonMixin:
         top_n: int = DEFAULT_TOP_N_COMPARISON,
     ) -> plt.Figure:
         """
-        比较多策略的回测指标 - 优化布局版本
+        Compare multi-strategy backtest metrics - optimized layout version
 
-        针对 11 个策略的对比进行优化:
-        - 2x3 子图布局展示核心指标
-        - 分组柱状图避免拥挤
+        Optimized for comparing 11 strategies:
+        - 2x3 subplot layout displaying core metrics
+        - Grouped bar charts to avoid crowding
 
         Args:
-            results: Dict[str, BacktestResult] - 策略名称到结果的映射
-            save_path: 保存路径（可选）
-            show_plot: 是否显示图表（默认 True）
-            top_n: 详细对比显示前 N 个策略（默认 6）
+            results: Dict[str, BacktestResult] - strategy name to result mapping
+            save_path: Save path (optional)
+            show_plot: Whether to display the chart (default True)
+            top_n: Number of top strategies to display in detail (default 6)
 
         Returns:
-            matplotlib Figure 对象
+            matplotlib Figure object
         """
-        # 定义指标
+        # Define metrics
         metrics_config = [
             ("total_return_pct", "Total Return (%)", "#2E86AB"),
             ("annual_return_pct", "Annual Return (%)", "#A23B72"),
@@ -57,16 +57,16 @@ class ComparisonMixin:
         strategies = list(results.keys())
         n_strategies = len(strategies)
 
-        # 创建 2x3 子图布局
+        # Create 2x3 subplot layout
         fig, axes = plt.subplots(2, 3, figsize=DEFAULT_COMPARISON_FIGSIZE)
         axes = axes.flatten()
 
-        # 为每个指标创建子图
+        # Create subplot for each metric
         for idx, (metric, label, color) in enumerate(metrics_config):
             ax = axes[idx]
             values = [results[s].metrics.get(metric, 0) for s in strategies]
 
-            # 根据数值排序获取颜色映射
+            # Get color mapping based on value sorting
             sorted_indices = np.argsort(values)[::-1] if metric != "max_drawdown_pct" else np.argsort(values)
             colors = [
                 "#27ae60" if i == sorted_indices[0]
@@ -86,7 +86,7 @@ class ComparisonMixin:
             ax.grid(True, alpha=0.3, axis='y')
             ax.set_axisbelow(True)
 
-            # 添加数值标签
+            # Add value labels
             for bar, val in zip(bars, values):
                 height = bar.get_height()
                 va = 'bottom' if height >= 0 else 'top'
@@ -98,7 +98,7 @@ class ComparisonMixin:
                     ha="center", va=va, fontsize=8, fontweight='bold',
                 )
 
-            # 添加零线（针对可能有负值的指标）
+            # Add zero line (for metrics that may have negative values)
             if metric in ["total_return_pct", "annual_return_pct", "max_drawdown_pct"]:
                 ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
 
@@ -123,27 +123,28 @@ class ComparisonMixin:
         show_plot: bool = True,
     ) -> plt.Figure:
         """
-        绘制策略排名图 - 水平条形图
+        Plot strategy ranking chart - horizontal bar chart
 
-        用水平条形图展示策略按指定指标的排名，更适合显示多个策略。
+        Displays strategy ranking by specified metric using a horizontal bar chart,
+        better suited for showing multiple strategies.
 
         Args:
-            results: Dict[str, BacktestResult] - 策略结果
-            metric: 排序指标（默认 'sharpe_ratio'）
-            save_path: 保存路径（可选）
-            show_plot: 是否显示图表（默认 True）
+            results: Dict[str, BacktestResult] - strategy results
+            metric: Sorting metric (default 'sharpe_ratio')
+            save_path: Save path (optional)
+            show_plot: Whether to display the chart (default True)
 
         Returns:
-            matplotlib Figure 对象
+            matplotlib Figure object
         """
         strategies = list(results.keys())
         values = [results[s].metrics.get(metric, 0) for s in strategies]
 
-        # 排序
+        # Sort
         sorted_pairs = sorted(zip(strategies, values), key=lambda x: x[1], reverse=True)
         sorted_strategies, sorted_values = zip(*sorted_pairs)
 
-        # 颜色渐变
+        # Color gradient
         colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(strategies)))
 
         fig, ax = plt.subplots(
@@ -162,7 +163,7 @@ class ComparisonMixin:
         )
         ax.grid(True, alpha=0.3, axis='x')
 
-        # 添加数值标签
+        # Add value labels
         for bar, val in zip(bars, sorted_values):
             width = bar.get_width()
             ax.text(
@@ -189,20 +190,20 @@ class ComparisonMixin:
         top_n: int = DEFAULT_TOP_N_EQUITY,
     ) -> plt.Figure:
         """
-        绘制多策略权益曲线对比
+        Plot multi-strategy equity curve comparison
 
-        只显示表现最好的 top_n 个策略的权益曲线，避免图表过于拥挤。
+        Only shows equity curves for the top_n best-performing strategies to avoid chart crowding.
 
         Args:
-            results: Dict[str, BacktestResult] - 策略结果
-            save_path: 保存路径（可选）
-            show_plot: 是否显示图表（默认 True）
-            top_n: 显示前 N 个策略（默认 5）
+            results: Dict[str, BacktestResult] - strategy results
+            save_path: Save path (optional)
+            show_plot: Whether to display the chart (default True)
+            top_n: Number of top strategies to display (default 5)
 
         Returns:
-            matplotlib Figure 对象
+            matplotlib Figure object
         """
-        # 按总收益排序
+        # Sort by total return
         sorted_results = sorted(
             results.items(),
             key=lambda x: x[1].metrics.get("total_return_pct", 0),
@@ -215,7 +216,7 @@ class ComparisonMixin:
         colors = plt.cm.tab10(np.linspace(0, 1, top_n))
 
         for i, (name, result) in enumerate(top_strategies):
-            # 归一化到初始资金
+            # Normalize to initial capital
             normalized = result.equity_curve / result.equity_curve.iloc[0]
             ax.plot(
                 normalized.index, normalized.values,

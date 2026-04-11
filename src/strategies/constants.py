@@ -1,64 +1,64 @@
 """
-策略参数常量
+Strategy Parameter Constants
 
-集中定义所有策略的默认参数值，便于统一管理和调整。
-每个常量名清晰地表达了其含义，替代代码中的魔法数字。
+Centrally defines default parameter values for all strategies for unified management and tuning.
+Each constant name clearly expresses its meaning, replacing magic numbers in the code.
 """
 
 # ============================================================
-# 均线策略默认值
+# Moving Average strategy defaults
 # ============================================================
-DEFAULT_MA_SHORT = 10             # 短期均线窗口
-DEFAULT_MA_LONG = 30              # 长期均线窗口
+DEFAULT_MA_SHORT = 10             # Short-term moving average window
+DEFAULT_MA_LONG = 30              # Long-term moving average window
 
 # ============================================================
-# RSI 指标默认值
+# RSI indicator defaults
 # ============================================================
-DEFAULT_RSI_PERIOD = 14           # RSI 计算周期
-DEFAULT_RSI_OVERSOLD = 30         # RSI 超卖阈值
-DEFAULT_RSI_OVERBOUGHT = 70       # RSI 超买阈值
+DEFAULT_RSI_PERIOD = 14           # RSI calculation period
+DEFAULT_RSI_OVERSOLD = 30         # RSI oversold threshold
+DEFAULT_RSI_OVERBOUGHT = 70       # RSI overbought threshold
 
 # ============================================================
-# 布林带默认值
+# Bollinger Bands defaults
 # ============================================================
-DEFAULT_BB_WINDOW = 20            # 布林带移动窗口
-DEFAULT_BB_NUM_STD = 2.0          # 布林带标准差倍数
+DEFAULT_BB_WINDOW = 20            # Bollinger Bands moving window
+DEFAULT_BB_NUM_STD = 2.0          # Bollinger Bands standard deviation multiplier
 
 # ============================================================
-# MACD 默认周期
+# MACD default periods
 # ============================================================
-DEFAULT_MACD_FAST = 12            # MACD 快线周期
-DEFAULT_MACD_SLOW = 26            # MACD 慢线周期
-DEFAULT_MACD_SIGNAL = 9           # MACD 信号线周期
+DEFAULT_MACD_FAST = 12            # MACD fast line period
+DEFAULT_MACD_SLOW = 26            # MACD slow line period
+DEFAULT_MACD_SIGNAL = 9           # MACD signal line period
 
 # ============================================================
-# 多因子策略权重
+# Multi-factor strategy weights
 # ============================================================
-WEIGHT_MA_TREND = 0.3             # 均线趋势权重
-WEIGHT_RSI = 0.3                  # RSI 因子权重
-WEIGHT_VOLUME = 0.2               # 成交量因子权重
-WEIGHT_VOLATILITY = 0.2           # 波动率因子权重
+WEIGHT_MA_TREND = 0.3             # Moving average trend weight
+WEIGHT_RSI = 0.3                  # RSI factor weight
+WEIGHT_VOLUME = 0.2               # Volume factor weight
+WEIGHT_VOLATILITY = 0.2           # Volatility factor weight
 
 # ============================================================
-# 多因子策略阈值
+# Multi-factor strategy thresholds
 # ============================================================
-SCORE_BUY_THRESHOLD = 0.5         # 综合评分买入阈值
-SCORE_SELL_THRESHOLD = -0.5       # 综合评分卖出阈值
-DEFAULT_VOLUME_THRESHOLD = 1.5    # 成交量比值阈值
-VOLUME_LOW_RATIO = 0.5            # 成交量低比值阈值
-VOLATILITY_QUANTILE = 0.7         # 高波动率分位数阈值
-DEFAULT_VOLUME_MA_WINDOW = 20     # 成交量均线窗口
-DEFAULT_VOLATILITY_WINDOW = 20    # 波动率计算窗口
+SCORE_BUY_THRESHOLD = 0.5         # Composite score buy threshold
+SCORE_SELL_THRESHOLD = -0.5       # Composite score sell threshold
+DEFAULT_VOLUME_THRESHOLD = 1.5    # Volume ratio threshold
+VOLUME_LOW_RATIO = 0.5            # Low volume ratio threshold
+VOLATILITY_QUANTILE = 0.7         # High volatility quantile threshold
+DEFAULT_VOLUME_MA_WINDOW = 20     # Volume moving average window
+DEFAULT_VOLATILITY_WINDOW = 20    # Volatility calculation window
 
 # ============================================================
-# 均值回归策略阈值
+# Mean Reversion strategy thresholds
 # ============================================================
-DEFAULT_MEAN_REVERSION_WINDOW = 20  # 均值回归计算窗口
-DEFAULT_ENTRY_Z = 2.0             # Z-score 入场阈值
-DEFAULT_EXIT_Z = 0.5              # Z-score 出场阈值
+DEFAULT_MEAN_REVERSION_WINDOW = 20  # Mean reversion calculation window
+DEFAULT_ENTRY_Z = 2.0             # Z-score entry threshold
+DEFAULT_EXIT_Z = 0.5              # Z-score exit threshold
 
 # ============================================================
-# 随机指标阈值
+# Stochastic Oscillator thresholds
 # ============================================================
-STOCHASTIC_OVERSOLD = 20          # 随机指标超卖阈值
-STOCHASTIC_OVERBOUGHT = 80        # 随机指标超买阈值
+STOCHASTIC_OVERSOLD = 20          # Stochastic oversold threshold
+STOCHASTIC_OVERBOUGHT = 80        # Stochastic overbought threshold

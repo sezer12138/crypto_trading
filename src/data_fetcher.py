@@ -37,14 +37,14 @@ class CryptoDataFetcher:
 
         self.symbols = {"btc": "BTCUSDT", "eth": "ETHUSDT", "sol": "SOLUSDT"}
 
-        # SSL验证: 仅在环境变量 CRYPTO_DISABLE_SSL=1 时关闭
+        # SSL verification: only disabled when environment variable CRYPTO_DISABLE_SSL=1
         import os
         self.verify_ssl = verify_ssl and os.environ.get("CRYPTO_DISABLE_SSL") != "1"
 
         if not self.verify_ssl:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            logger.warning("⚠️  SSL验证已禁用 (CRYPTO_DISABLE_SSL=1)，请确保网络环境安全")
+            logger.warning("SSL verification disabled (CRYPTO_DISABLE_SSL=1), ensure network environment is secure")
 
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -79,9 +79,9 @@ class CryptoDataFetcher:
             try:
                 response = requests.get(url, params=params, timeout=10, verify=self.verify_ssl)
 
-                # 处理限流
+                # Handle rate limiting
                 if response.status_code == 429:
-                    wait_time = (attempt + 1) * 2  # 指数退避
+                    wait_time = (attempt + 1) * 2  # Exponential backoff
                     logger.warning(f"Rate limited by CoinGecko, waiting {wait_time}s...")
                     time.sleep(wait_time)
                     continue

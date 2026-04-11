@@ -1,16 +1,16 @@
 """
-多因子组合策略
+Multi-Factor Composite Strategy
 
-结合均线趋势、RSI、成交量、波动率等多个因子进行综合评分。
-属于综合评分类策略，适合高频交易。
+Combines multiple factors including moving average trend, RSI, volume, and volatility for composite scoring.
+A composite scoring strategy suitable for high-frequency trading.
 
-评分体系:
-    - 均线趋势 (权重 30%): 短期均线与长期均线的方向
-    - RSI 因子 (权重 30%): 归一化 RSI 值 (范围 -1 到 1)
-    - 成交量确认 (权重 20%): 成交量比值与阈值比较
-    - 波动率过滤 (权重 20%): 高波动率扣分
+Scoring System:
+    - Moving Average Trend (weight 30%): Direction of short-term vs long-term moving average
+    - RSI Factor (weight 30%): Normalized RSI value (range -1 to 1)
+    - Volume Confirmation (weight 20%): Volume ratio compared to threshold
+    - Volatility Filter (weight 20%): Penalty for high volatility
 
-使用示例:
+Usage example:
     >>> from strategies import get_strategy
     >>> strategy = get_strategy('multi_factor', ma_short=5, ma_long=20)
     >>> result_df = strategy.generate_signals(df)
@@ -31,23 +31,24 @@ from strategies.constants import (
 
 class MultiFactorStrategy(TradingStrategy):
     """
-    多因子组合策略 (高频)
+    Multi-Factor Composite Strategy (High Frequency)
 
-    结合均线、RSI、成交量、波动率等多个因子，通过加权评分系统生成信号。
-    综合评分 > 0.5 时买入，< -0.5 时卖出。
+    Combines multiple factors including moving average, RSI, volume, and volatility,
+    generating signals through a weighted scoring system.
+    Buy when composite score > 0.5, sell when composite score < -0.5.
 
     Args:
-        ma_short: 短期均线窗口 (默认 5)
-        ma_long: 长期均线窗口 (默认 20)
-        rsi_period: RSI 计算周期 (默认 14)
-        volume_threshold: 成交量比值阈值 (默认 1.5)
+        ma_short: Short-term moving average window (default 5)
+        ma_long: Long-term moving average window (default 20)
+        rsi_period: RSI calculation period (default 14)
+        volume_threshold: Volume ratio threshold (default 1.5)
 
-    生成的指标列:
-        ma_short, ma_long, ma_trend: 均线及趋势方向
-        rsi, rsi_norm: RSI 及其归一化值
-        volume_ma, volume_ratio: 成交量均线及比值
-        returns, volatility: 收益率及波动率
-        score: 综合评分 (范围约 -1 到 1)
+    Generated indicator columns:
+        ma_short, ma_long, ma_trend: Moving averages and trend direction
+        rsi, rsi_norm: RSI and its normalized value
+        volume_ma, volume_ratio: Volume moving average and ratio
+        returns, volatility: Return rate and volatility
+        score: Composite score (range approximately -1 to 1)
     """
 
     def __init__(
@@ -65,32 +66,32 @@ class MultiFactorStrategy(TradingStrategy):
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        计算所有技术指标
+        Calculate all technical indicators
 
-        依次计算均线系统、RSI、成交量因子和波动率指标。
+        Calculates moving average system, RSI, volume factor, and volatility indicators in sequence.
 
         Args:
-            df: 包含 OHLCV 数据的 DataFrame
+            df: DataFrame containing OHLCV data
 
         Returns:
-            添加了各项指标列的 DataFrame
+            DataFrame with indicator columns added
         """
         df = df.copy()
 
-        # 均线系统
+        # Moving average system
         df["ma_short"] = df["close"].rolling(window=self.ma_short).mean()
         df["ma_long"] = df["close"].rolling(window=self.ma_long).mean()
         df["ma_trend"] = (df["ma_short"] > df["ma_long"]).astype(int)
 
-        # RSI (使用共享的 RSI 计算函数)
+        # RSI (using shared RSI calculation function)
         df["rsi"] = calculate_rsi(df["close"], self.rsi_period)
-        df["rsi_norm"] = (df["rsi"] - 50) / 50  # 归一化到 [-1, 1]
+        df["rsi_norm"] = (df["rsi"] - 50) / 50  # Normalized to [-1, 1]
 
-        # 成交量因子
+        # Volume factor
         df["volume_ma"] = df["volume"].rolling(window=DEFAULT_VOLUME_MA_WINDOW).mean()
         df["volume_ratio"] = df["volume"] / df["volume_ma"].replace(0, float("nan"))
 
-        # 波动率
+        # Volatility
         df["returns"] = df["close"].pct_change()
         df["volatility"] = df["returns"].rolling(window=DEFAULT_VOLATILITY_WINDOW).std()
 
@@ -98,34 +99,34 @@ class MultiFactorStrategy(TradingStrategy):
 
     def _calculate_score(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        计算多因子综合评分
+        Calculate multi-factor composite score
 
-        评分体系:
-            - 均线趋势 (权重 30%): 短期均线在长期均线上方加分，下方减分
-            - RSI (权重 30%): 归一化 RSI 值 (范围 -1 到 1)
-            - 成交量确认 (权重 20%): 成交量放大加分，缩小减分
-            - 波动率过滤 (权重 20%): 高波动率环境下减分
+        Scoring system:
+            - Moving average trend (weight 30%): Positive when short MA is above long MA, negative when below
+            - RSI (weight 30%): Normalized RSI value (range -1 to 1)
+            - Volume confirmation (weight 20%): Positive when volume expands, negative when it shrinks
+            - Volatility filter (weight 20%): Penalty in high volatility environments
 
         Args:
-            df: 包含技术指标的 DataFrame
+            df: DataFrame containing technical indicators
 
         Returns:
-            添加了 'score' 列的 DataFrame，范围约 [-1, 1]
+            DataFrame with a 'score' column added, range approximately [-1, 1]
         """
         df["score"] = 0.0
 
-        # 均线趋势 (权重 30%)
+        # Moving average trend (weight 30%)
         df.loc[df["ma_short"] > df["ma_long"], "score"] += WEIGHT_MA_TREND
         df.loc[df["ma_short"] < df["ma_long"], "score"] -= WEIGHT_MA_TREND
 
-        # RSI (权重 30%)
+        # RSI (weight 30%)
         df["score"] += df["rsi_norm"] * WEIGHT_RSI
 
-        # 成交量确认 (权重 20%)
+        # Volume confirmation (weight 20%)
         df.loc[df["volume_ratio"] > self.volume_threshold, "score"] += WEIGHT_VOLUME
         df.loc[df["volume_ratio"] < VOLUME_LOW_RATIO, "score"] -= WEIGHT_VOLUME
 
-        # 波动率过滤 (权重 20%)
+        # Volatility filter (weight 20%)
         vol_threshold = df["volatility"].quantile(VOLATILITY_QUANTILE)
         df.loc[df["volatility"] > vol_threshold, "score"] -= WEIGHT_VOLATILITY
 
@@ -133,32 +134,32 @@ class MultiFactorStrategy(TradingStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        生成交易信号
+        Generate trading signals
 
-        综合评分 > 买入阈值 (0.5) 时产生买入信号，
-        综合评分 < 卖出阈值 (-0.5) 时产生卖出信号。
+        Buy signal when composite score > buy threshold (0.5),
+        sell signal when composite score < sell threshold (-0.5).
 
-        与简单策略不同，此策略使用逐行持仓管理，
-        因为评分系统可能频繁在阈值附近波动。
+        Unlike simple strategies, this strategy uses vectorized forward fill for position management,
+        as the scoring system may fluctuate frequently around the threshold.
 
         Args:
-            df: 包含 OHLCV 数据的 DataFrame
+            df: DataFrame containing OHLCV data
 
         Returns:
-            添加了 score, signal, position 列的 DataFrame
+            DataFrame with score, signal, position columns added
         """
         df = self.calculate_indicators(df)
         df = self._calculate_score(df)
 
-        # 生成信号
+        # Generate signals
         df["signal"] = 0
         df.loc[df["score"] > SCORE_BUY_THRESHOLD, "signal"] = 1
         df.loc[df["score"] < SCORE_SELL_THRESHOLD, "signal"] = -1
 
-        # 持仓状态（使用向量化前向填充，等效于逐行管理）
+        # Position state (using vectorized forward fill, equivalent to row-by-row management)
         from strategies._helpers import forward_fill_position
         df = forward_fill_position(df)
-        # 将 -1 持仓映射为 0（空仓），保持买入后持仓=1
+        # Map -1 position to 0 (no position), keeping position=1 after buy
         df["position"] = df["position"].clip(lower=0)
 
         return df

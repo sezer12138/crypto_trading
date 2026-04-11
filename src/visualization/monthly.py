@@ -1,7 +1,7 @@
 """
-月度收益热力图
+Monthly Returns Heatmap
 
-将日收益聚合成月度收益，以热力图形式展示各月表现。
+Aggregates daily returns into monthly returns and displays monthly performance as a heatmap.
 """
 
 import calendar
@@ -19,7 +19,7 @@ from visualization._constants import (
 
 
 class MonthlyPlotMixin:
-    """月度收益绘图方法"""
+    """Monthly returns plotting methods"""
 
     def plot_monthly_returns(
         self,
@@ -28,25 +28,25 @@ class MonthlyPlotMixin:
         show_plot: bool = True,
     ) -> Optional[plt.Figure]:
         """
-        绘制月度收益热力图
+        Plot monthly returns heatmap
 
-        将日收益聚合成月度收益，以热力图形式展示各月表现。
-        红色表示亏损，绿色表示盈利，颜色深浅表示幅度。
+        Aggregates daily returns into monthly returns and displays monthly performance as a heatmap.
+        Red indicates losses, green indicates profits, color intensity indicates magnitude.
 
         Args:
-            result: BacktestResult 对象，包含 daily_returns
-            save_path: 保存路径（可选）
-            show_plot: 是否显示图表（默认 True）
+            result: BacktestResult object containing daily_returns
+            save_path: Save path (optional)
+            show_plot: Whether to display the chart (default True)
 
         Returns:
-            matplotlib Figure 对象，如果没有数据则返回 None
+            matplotlib Figure object, or None if no data is available
         """
         if result.daily_returns is None or len(result.daily_returns) == 0:
             import logging
-            logging.getLogger(__name__).warning("没有日收益数据，无法生成月度热力图")
+            logging.getLogger(__name__).warning("No daily returns data, cannot generate monthly heatmap")
             return None
 
-        # 计算月度收益
+        # Calculate monthly returns
         monthly_returns = (
             result.daily_returns.resample("ME").apply(lambda x: (1 + x).prod() - 1) * 100
         )
@@ -61,7 +61,7 @@ class MonthlyPlotMixin:
 
         fig, ax = plt.subplots(figsize=DEFAULT_MONTHLY_FIGSIZE)
 
-        # 使用 diverging colormap，中心为白色
+        # Use diverging colormap, center is white
         im = ax.imshow(
             pivot_table.values,
             cmap="RdYlGn",
@@ -70,19 +70,19 @@ class MonthlyPlotMixin:
             vmax=MONTHLY_RETURN_VMAX,
         )
 
-        # 设置坐标轴标签
+        # Set axis labels
         ax.set_xticks(range(len(pivot_table.columns)))
         ax.set_xticklabels(pivot_table.columns)
         ax.set_yticks(range(len(pivot_table.index)))
-        # 使用 calendar 模块替代硬编码月份名
+        # Use calendar module instead of hardcoded month names
         ax.set_yticklabels([calendar.month_abbr[i] for i in pivot_table.index])
 
-        # 在每个单元格添加数值
+        # Add numeric values to each cell
         for i in range(len(pivot_table.index)):
             for j in range(len(pivot_table.columns)):
                 value = pivot_table.iloc[i, j]
                 if not np.isnan(value):
-                    # 绝对值大于阈值时使用白色文字，否则使用黑色
+                    # Use white text when absolute value exceeds threshold, otherwise black
                     color = "white" if abs(value) > COLOR_TEXT_THRESHOLD else "black"
                     ax.text(
                         j, i, f"{value:.1f}%",
@@ -94,7 +94,7 @@ class MonthlyPlotMixin:
         ax.set_xlabel("Year", fontsize=12)
         ax.set_ylabel("Month", fontsize=12)
 
-        # 添加颜色条
+        # Add color bar
         cbar = fig.colorbar(im, ax=ax)
         cbar.set_label("Return (%)", rotation=270, labelpad=15)
 

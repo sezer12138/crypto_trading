@@ -40,7 +40,7 @@ class BinanceWebSocketClient:
     def _get_stream_url(self, use_port_443: bool = True) -> str:
         """Generate WebSocket stream URL."""
         streams = "/".join([f"{self.symbols[coin.lower()]}@ticker" for coin in self.coins])
-        # 使用 443 端口避免防火墙问题
+        # Use port 443 to avoid firewall issues
         if use_port_443:
             return f"wss://stream.binance.com:443/ws/{streams}"
         return f"wss://stream.binance.com:9443/ws/{streams}"
@@ -127,20 +127,20 @@ class BinanceWebSocketClient:
     def start(self):
         """Start WebSocket connection."""
         with self._lock:
-            # 防止重复启动
+            # Prevent duplicate startup
             if self._running.is_set():
                 logger.warning("WebSocket is already running")
                 return
 
             websocket.enableTrace(False)
 
-            # SSL: 仅在环境变量 CRYPTO_DISABLE_SSL=1 时禁用验证
+            # SSL: only disable verification when environment variable CRYPTO_DISABLE_SSL=1
             import os
             ssl_context = ssl.create_default_context()
             if os.environ.get("CRYPTO_DISABLE_SSL") == "1":
                 ssl_context.check_hostname = False
                 ssl_context.verify_mode = ssl.CERT_NONE
-                logger.warning("⚠️  WebSocket SSL验证已禁用 (CRYPTO_DISABLE_SSL=1)")
+                logger.warning("WebSocket SSL verification disabled (CRYPTO_DISABLE_SSL=1)")
 
             self.ws = websocket.WebSocketApp(
                 self._get_stream_url(use_port_443=True),
@@ -183,7 +183,7 @@ class AggregatedDataClient:
         with self._data_lock:
             self.latest_data[coin] = data
 
-        # 实时显示数据
+        # Display real-time data
         timestamp = datetime.now().strftime("%H:%M:%S")
         price = data["price"]
         change = data["price_change_percent"]

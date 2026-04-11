@@ -1,7 +1,7 @@
 """
-价格与交易信号可视化
+Price and Trading Signals Visualization
 
-绘制价格走势图并标注买卖信号，同时显示成交量。
+Plots price trends with buy/sell signal annotations and volume display.
 """
 
 from typing import Optional
@@ -13,7 +13,7 @@ from visualization._constants import DEFAULT_PRICE_FIGSIZE, PRICE_HEIGHT_RATIO
 
 
 class PriceSignalsMixin:
-    """价格信号绘图方法"""
+    """Price signal plotting methods"""
 
     def plot_price_with_signals(
         self,
@@ -24,32 +24,33 @@ class PriceSignalsMixin:
         show_plot: bool = True,
     ) -> plt.Figure:
         """
-        绘制价格图和交易信号
+        Plot price chart and trading signals
 
-        展示价格走势并标注买卖信号点，同时显示成交量。
+        Displays price trends with buy/sell signal annotations and volume.
 
         Args:
-            df: 包含 OHLCV 数据的 DataFrame
-            result: BacktestResult 对象，包含 trades 记录
-            title: 图表标题
-            save_path: 保存路径（可选）
-            show_plot: 是否显示图表（默认 True）
+            df: DataFrame containing OHLCV data
+            result: BacktestResult object containing trade records
+            title: Chart title
+            save_path: Save path (optional)
+            show_plot: Whether to display the chart (default True)
 
         Returns:
-            matplotlib Figure 对象
+            matplotlib Figure object
 
         Note:
-            买入信号用绿色三角形标记，卖出信号用红色倒三角标记
+            Buy signals are marked with green upward triangles,
+            sell signals are marked with red downward triangles.
         """
         fig, (ax1, ax2) = plt.subplots(
             2, 1, figsize=DEFAULT_PRICE_FIGSIZE,
             gridspec_kw={"height_ratios": [PRICE_HEIGHT_RATIO, 1]}
         )
 
-        # 价格图
+        # Price chart
         ax1.plot(df.index, df["close"], label="Price", color="#2E86AB", linewidth=1.5)
 
-        # 标记买卖点
+        # Mark buy and sell points
         buy_trades = [t for t in result.trades if t.action == "buy"]
         sell_trades = [t for t in result.trades if t.action == "sell"]
 
@@ -69,7 +70,7 @@ class PriceSignalsMixin:
                 s=100, label="Sell", zorder=5, edgecolors='black', linewidths=0.5
             )
 
-        # 显示均线（如果存在）
+        # Show moving averages (if present)
         if "ma_short" in df.columns and "ma_long" in df.columns:
             ax1.plot(
                 df.index, df["ma_short"],
@@ -85,7 +86,7 @@ class PriceSignalsMixin:
         ax1.legend(loc="best")
         ax1.grid(True, alpha=0.3)
 
-        # 成交量图（使用向量化操作替代循环）
+        # Volume chart (using vectorized operations instead of loops)
         if "volume" in df.columns:
             colors = ["green" if c >= o else "red"
                       for c, o in zip(df["close"], df["open"])]

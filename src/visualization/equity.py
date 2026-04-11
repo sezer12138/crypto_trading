@@ -1,7 +1,7 @@
 """
-权益曲线可视化
+Equity Curve Visualization
 
-绘制权益曲线、累计收益率和回撤分析的三子图布局。
+Plots equity curve, cumulative returns, and drawdown analysis in a three-subplot layout.
 """
 
 from typing import Optional
@@ -13,7 +13,7 @@ from visualization._constants import DEFAULT_EQUITY_FIGSIZE
 
 
 class EquityPlotMixin:
-    """权益曲线绘图方法"""
+    """Equity curve plotting methods"""
 
     def plot_equity_curve(
         self,
@@ -23,25 +23,25 @@ class EquityPlotMixin:
         show_plot: bool = True,
     ) -> plt.Figure:
         """
-        绘制权益曲线和收益曲线
+        Plot equity curve and returns
 
-        生成三子图布局:
-        1. 权益曲线 - 展示资金变化
-        2. 累计收益率 - 百分比收益
-        3. 回撤曲线 - 最大回撤分析
+        Generates a three-subplot layout:
+        1. Equity curve - shows capital changes
+        2. Cumulative returns - percentage returns
+        3. Drawdown curve - maximum drawdown analysis
 
         Args:
-            result: BacktestResult 对象，包含 equity_curve 和 metrics
-            title: 图表主标题
-            save_path: 保存路径（可选）
-            show_plot: 是否显示图表（默认 True）
+            result: BacktestResult object containing equity_curve and metrics
+            title: Chart main title
+            save_path: Save path (optional)
+            show_plot: Whether to display the chart (default True)
 
         Returns:
-            matplotlib Figure 对象
+            matplotlib Figure object
         """
         fig, axes = plt.subplots(3, 1, figsize=DEFAULT_EQUITY_FIGSIZE)
 
-        # 1. 权益曲线
+        # 1. Equity curve
         ax1 = axes[0]
         ax1.plot(
             result.equity_curve.index,
@@ -65,7 +65,7 @@ class EquityPlotMixin:
             plt.FuncFormatter(lambda x, p: f"${x:,.0f}")
         )
 
-        # 2. 累计收益率
+        # 2. Cumulative returns
         ax2 = axes[1]
         ax2.plot(
             result.cumulative_returns.index,
@@ -86,7 +86,7 @@ class EquityPlotMixin:
         ax2.legend(loc="upper left")
         ax2.grid(True, alpha=0.3)
 
-        # 3. 回撤曲线
+        # 3. Drawdown curve
         ax3 = axes[2]
         cummax = result.equity_curve.cummax()
         drawdown = (result.equity_curve - cummax) / cummax * 100

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Crypto trading backtesting system with 13 built-in strategies, historical data fetching from Binance, and visualization. Documentation and comments are in Chinese.
+Crypto trading backtesting system with 13 built-in strategies, historical data fetching from Binance, and visualization. All documentation and comments are in English.
 
 ## Commands
 
@@ -61,6 +61,7 @@ Four-layer pipeline: **Data → Strategy → Backtest → Visualization**
 ## Key Conventions
 
 - Code style: Black formatter (line-length=100), type hints, Google-style docstrings.
+- **All comments, docstrings, and log messages must be in English only — no Chinese.**
 - Strategy signals use numeric codes: 1 (buy), -1 (sell), 0 (hold).
 - Config at `config/settings.yaml` for data sources, logging, storage paths.
 - Backtest logs saved as JSON in `logs/`, chart outputs in `results/`.

@@ -1,11 +1,11 @@
 """
-ATR 动态止损策略
+ATR Dynamic Stop-Loss Strategy
 
-基于 ATR (Average True Range) 的动态止损和止盈策略。
-在上升趋势中回调到 ATR 支撑位时买入，下降趋势中反弹到 ATR 阻力位时卖出。
-属于趋势跟踪类策略，适合高频交易。
+Dynamic stop-loss and take-profit strategy based on ATR (Average True Range).
+Buy on pullbacks to ATR support levels during uptrends, sell on bounces to ATR resistance levels during downtrends.
+A trend-following strategy suitable for high-frequency trading.
 
-使用示例:
+Usage example:
     >>> from strategies import get_strategy
     >>> strategy = get_strategy('atr_stop', atr_period=14, multiplier=2.0)
     >>> result_df = strategy.generate_signals(df)
@@ -19,20 +19,20 @@ from strategies._helpers import forward_fill_position
 
 class ATRStopLossStrategy(TradingStrategy):
     """
-    ATR 动态止损策略 (高频)
+    ATR Dynamic Stop-Loss Strategy (High Frequency)
 
-    ATR 衡量市场波动性，策略根据 ATR 的倍数设定支撑/阻力位:
-    - 上升趋势中，价格回调到 ATR 支撑位时买入
-    - 下降趋势中，价格反弹到 ATR 阻力位时卖出
+    ATR measures market volatility; the strategy sets support/resistance levels based on ATR multiples:
+    - In uptrends, buy when price pulls back to ATR support level
+    - In downtrends, sell when price bounces to ATR resistance level
 
     Args:
-        atr_period: ATR 计算周期 (默认 14)
-        multiplier: ATR 倍数 (默认 2.0)
-        trend_ma: 趋势判断均线周期 (默认 50)
+        atr_period: ATR calculation period (default 14)
+        multiplier: ATR multiplier (default 2.0)
+        trend_ma: Trend determination moving average period (default 50)
 
-    生成的指标列:
-        atr: 平均真实范围
-        trend_ma: 趋势判断均线
+    Generated indicator columns:
+        atr: Average True Range
+        trend_ma: Trend determination moving average
     """
 
     def __init__(self, atr_period: int = 14, multiplier: float = 2.0, trend_ma: int = 50):
@@ -43,18 +43,18 @@ class ATRStopLossStrategy(TradingStrategy):
 
     def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
         """
-        计算平均真实范围 (ATR)
+        Calculate Average True Range (ATR)
 
-        ATR 是衡量市场波动性的指标，取以下三者的最大值的移动平均:
-        1. 当日最高价 - 当日最低价
-        2. |当日最高价 - 昨日收盘价|
-        3. |当日最低价 - 昨日收盘价|
+        ATR is a measure of market volatility, taking the moving average of the maximum of:
+        1. Current day high - current day low
+        2. |Current day high - previous day close|
+        3. |Current day low - previous day close|
 
         Args:
-            df: 包含 high, low, close 列的 DataFrame
+            df: DataFrame containing high, low, close columns
 
         Returns:
-            ATR 值序列
+            ATR value series
         """
         high_low = df["high"] - df["low"]
         high_close = (df["high"] - df["close"].shift(1)).abs()
@@ -64,27 +64,27 @@ class ATRStopLossStrategy(TradingStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        生成交易信号
+        Generate trading signals
 
-        上升趋势中价格回调到 ATR 支撑位买入，
-        下降趋势中价格反弹到 ATR 阻力位卖出。
+        Buy on pullback to ATR support level during uptrend,
+        sell on bounce to ATR resistance level during downtrend.
 
         Args:
-            df: 包含 OHLCV 数据的 DataFrame
+            df: DataFrame containing OHLCV data
 
         Returns:
-            添加了 atr, trend_ma, signal, position 列的 DataFrame
+            DataFrame with atr, trend_ma, signal, position columns added
         """
         df = df.copy()
         df["atr"] = self.calculate_atr(df)
         df["trend_ma"] = df["close"].rolling(window=self.trend_ma).mean()
         df["signal"] = 0
 
-        # 趋势判断
+        # Trend determination
         uptrend = df["close"] > df["trend_ma"]
         downtrend = df["close"] < df["trend_ma"]
 
-        # 上升趋势中，回调到 ATR 支撑位买入
+        # In uptrend, buy on pullback to ATR support level
         support = df["close"] - df["atr"] * self.multiplier
         resistance = df["close"] + df["atr"] * self.multiplier
 

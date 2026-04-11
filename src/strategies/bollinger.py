@@ -1,10 +1,10 @@
 """
-布林带策略
+Bollinger Bands Strategy
 
-价格触及下轨后回升买入，触及上轨后回落卖出。
-属于均值回归类策略，适合中高频交易。
+Buy when price bounces off the lower band, sell when price retreats from the upper band.
+A mean reversion strategy suitable for medium-to-high-frequency trading.
 
-使用示例:
+Usage example:
     >>> from strategies import get_strategy
     >>> strategy = get_strategy('bollinger', window=20, num_std=2.0)
     >>> result_df = strategy.generate_signals(df)
@@ -18,21 +18,21 @@ from strategies.constants import DEFAULT_BB_WINDOW, DEFAULT_BB_NUM_STD
 
 class BollingerBandsStrategy(TradingStrategy):
     """
-    布林带策略 (中高频)
+    Bollinger Bands Strategy (Medium-High Frequency)
 
-    布林带由中轨（移动平均线）和上下轨（±N倍标准差）构成。
-    价格触及下轨后回升时买入，触及上轨后回落时卖出。
+    Bollinger Bands consist of a middle band (moving average) and upper/lower bands (±N standard deviations).
+    Buy when price bounces off the lower band, sell when price retreats from the upper band.
 
     Args:
-        window: 移动平均线窗口 (默认 20)
-        num_std: 标准差倍数 (默认 2.0)
+        window: Moving average window (default 20)
+        num_std: Standard deviation multiplier (default 2.0)
 
-    生成的指标列:
-        middle_band: 中轨 (移动平均线)
-        std: 滚动标准差
-        upper_band: 上轨
-        lower_band: 下轨
-        bandwidth: 带宽 (上下轨差/中轨)
+    Generated indicator columns:
+        middle_band: Middle band (moving average)
+        std: Rolling standard deviation
+        upper_band: Upper band
+        lower_band: Lower band
+        bandwidth: Bandwidth (upper-lower band difference / middle band)
     """
 
     def __init__(self, window: int = DEFAULT_BB_WINDOW, num_std: float = DEFAULT_BB_NUM_STD):
@@ -42,13 +42,13 @@ class BollingerBandsStrategy(TradingStrategy):
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        计算布林带指标
+        Calculate Bollinger Bands indicators
 
         Args:
-            df: 包含 'close' 列的 DataFrame
+            df: DataFrame containing a 'close' column
 
         Returns:
-            添加了布林带相关列的 DataFrame
+            DataFrame with Bollinger Bands related columns added
         """
         df = df.copy()
         df["middle_band"] = df["close"].rolling(window=self.window).mean()
@@ -60,27 +60,28 @@ class BollingerBandsStrategy(TradingStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        生成交易信号
+        Generate trading signals
 
-        价格从下方突破下轨后回升买入，从上方突破上轨后回落卖出。
+        Buy when price breaks below the lower band and recovers,
+        sell when price breaks above the upper band and retreats.
 
         Args:
-            df: 包含 OHLCV 数据的 DataFrame
+            df: DataFrame containing OHLCV data
 
         Returns:
-            添加了 signal 和 position 列的 DataFrame
+            DataFrame with signal and position columns added
         """
         df = self.calculate_indicators(df)
 
         df["signal"] = 0
 
-        # 价格跌破下轨后回升买入
+        # Buy when price drops below lower band and recovers
         df.loc[
             (df["close"] > df["lower_band"]) & (df["close"].shift(1) <= df["lower_band"].shift(1)),
             "signal",
         ] = 1
 
-        # 价格突破上轨后回落卖出
+        # Sell when price breaks above upper band and retreats
         df.loc[
             (df["close"] < df["upper_band"]) & (df["close"].shift(1) >= df["upper_band"].shift(1)),
             "signal",

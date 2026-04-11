@@ -1,10 +1,11 @@
 """
-均值回归策略
+Mean Reversion Strategy
 
-价格偏离均值过大时（Z-score 超过阈值）反向操作，
-回归均值后平仓。属于均值回归类策略，适合高频交易。
+Take contrarian positions when price deviates significantly from the mean (Z-score exceeds threshold),
+close position when price reverts to the mean.
+A mean reversion strategy suitable for high-frequency trading.
 
-使用示例:
+Usage example:
     >>> from strategies import get_strategy
     >>> strategy = get_strategy('mean_reversion', window=20, entry_z=2.0, exit_z=0.5)
     >>> result_df = strategy.generate_signals(df)
@@ -17,22 +18,22 @@ from strategies.constants import DEFAULT_MEAN_REVERSION_WINDOW, DEFAULT_ENTRY_Z,
 
 class MeanReversionStrategy(TradingStrategy):
     """
-    均值回归策略 (高频)
+    Mean Reversion Strategy (High Frequency)
 
-    基于价格 Z-score 的均值回归策略:
-    - Z-score 低于 -entry_z 时买入（价格显著低于均值）
-    - Z-score 高于 entry_z 时卖出（价格显著高于均值）
-    - Z-score 回归到 exit_z 以内时平仓
+    Mean reversion strategy based on price Z-score:
+    - Buy when Z-score falls below -entry_z (price is significantly below mean)
+    - Sell when Z-score rises above entry_z (price is significantly above mean)
+    - Close position when Z-score reverts within exit_z
 
     Args:
-        window: 滚动均值和标准差的计算窗口 (默认 20)
-        entry_z: 入场 Z-score 阈值 (默认 2.0)
-        exit_z: 出场 Z-score 阈值 (默认 0.5)
+        window: Rolling mean and standard deviation calculation window (default 20)
+        entry_z: Entry Z-score threshold (default 2.0)
+        exit_z: Exit Z-score threshold (default 0.5)
 
-    生成的指标列:
-        mean: 滚动均值
-        std: 滚动标准差
-        zscore: Z-score 值
+    Generated indicator columns:
+        mean: Rolling mean
+        std: Rolling standard deviation
+        zscore: Z-score value
     """
 
     def __init__(self, window: int = DEFAULT_MEAN_REVERSION_WINDOW, entry_z: float = DEFAULT_ENTRY_Z, exit_z: float = DEFAULT_EXIT_Z):
@@ -43,38 +44,38 @@ class MeanReversionStrategy(TradingStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        生成交易信号
+        Generate trading signals
 
-        Z-score 低于 -entry_z 时买入，高于 entry_z 时卖出，
-        Z-score 绝对值小于 exit_z 时平仓（signal=0）。
+        Buy when Z-score falls below -entry_z, sell when above entry_z,
+        close position (signal=0) when absolute Z-score is less than exit_z.
 
-        注意: 此策略不平仓信号使用 0 而非 -1，
-        因此不使用 forward_fill_position，持仓由 Z-score 动态决定。
+        Note: This strategy uses 0 instead of -1 for close position signals,
+        so forward_fill_position is not used; position is determined dynamically by Z-score.
 
         Args:
-            df: 包含 'close' 列的 DataFrame
+            df: DataFrame containing a 'close' column
 
         Returns:
-            添加了 zscore, signal 列的 DataFrame
+            DataFrame with zscore, signal columns added
         """
         df = df.copy()
 
-        # 计算 Z-score
+        # Calculate Z-score
         df["mean"] = df["close"].rolling(window=self.window).mean()
         df["std"] = df["close"].rolling(window=self.window).std()
-        # 防止除零: std 为 0 时（平盘）zscore 为 0
+        # Division-by-zero guard: when std is 0 (flat market), zscore is 0
         df["zscore"] = (df["close"] - df["mean"]) / df["std"].replace(0, float("nan"))
         df["zscore"] = df["zscore"].fillna(0)
 
         df["signal"] = 0
 
-        # Z-score 低于 -entry_z 买入（超卖）
+        # Buy when Z-score is below -entry_z (oversold)
         df.loc[df["zscore"] < -self.entry_z, "signal"] = 1
 
-        # Z-score 高于 entry_z 卖出（超买）
+        # Sell when Z-score is above entry_z (overbought)
         df.loc[df["zscore"] > self.entry_z, "signal"] = -1
 
-        # 回归均值平仓
+        # Close position when reverting to mean
         df.loc[abs(df["zscore"]) < self.exit_z, "signal"] = 0
 
         return df

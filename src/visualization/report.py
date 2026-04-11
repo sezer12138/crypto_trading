@@ -1,7 +1,7 @@
 """
-报告生成模块
+Report Generation Module
 
-生成完整的回测报告，包含多个图表。
+Generates complete backtest reports containing multiple charts.
 """
 
 import logging
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReportMixin:
-    """报告生成方法"""
+    """Report generation methods"""
 
     def create_full_report(
         self,
@@ -28,32 +28,32 @@ class ReportMixin:
         interval: str = "1h",
     ) -> List[str]:
         """
-        生成完整报告（包含所有图表）
+        Generate full report (containing all charts)
 
-        依次生成权益曲线、价格信号图和月度收益热力图。
+        Generates equity curve, price signal chart, and monthly returns heatmap in sequence.
 
         Args:
-            result: BacktestResult 对象
-            df: 价格数据
-            strategy_name: 策略名称
-            coin: 币种
-            output_dir: 输出目录
-            days: 回测天数
-            interval: 时间粒度
+            result: BacktestResult object
+            df: Price data
+            strategy_name: Strategy name
+            coin: Coin symbol
+            output_dir: Output directory
+            days: Backtest days
+            interval: Time interval
 
         Returns:
-            生成的文件路径列表
+            List of generated file paths
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
 
-        # 文件命名格式: {strategy}_{coin}_{days}d_{interval}_{timestamp}_{type}.png
+        # File naming format: {strategy}_{coin}_{days}d_{interval}_{timestamp}_{type}.png
         base_name = f"{output_dir}/{strategy_name}_{coin}_{days}d_{interval}_{timestamp}"
         generated_files = []
 
-        # 1. 权益曲线
+        # 1. Equity curve
         fig1 = self.plot_equity_curve(
             result,
             title=f"{strategy_name} - {coin} Backtest",
@@ -63,7 +63,7 @@ class ReportMixin:
         generated_files.append(f"{base_name}_equity.png")
         plt.close(fig1)
 
-        # 2. 价格与信号
+        # 2. Price and signals
         fig2 = self.plot_price_with_signals(
             df, result,
             title=f"{coin} Price Chart with Signals",
@@ -73,7 +73,7 @@ class ReportMixin:
         generated_files.append(f"{base_name}_signals.png")
         plt.close(fig2)
 
-        # 3. 月度收益
+        # 3. Monthly returns
         fig3 = self.plot_monthly_returns(
             result,
             save_path=f"{base_name}_monthly.png",
@@ -84,7 +84,7 @@ class ReportMixin:
             plt.close(fig3)
 
         logger.info(
-            f"✅ 完整报告已生成: {output_dir}/\n   文件: {', '.join(generated_files)}"
+            f"✅ Full report generated: {output_dir}/\n   Files: {', '.join(generated_files)}"
         )
 
         return generated_files
@@ -98,32 +98,32 @@ class ReportMixin:
         interval: str = "1h",
     ) -> List[str]:
         """
-        生成策略对比报告
+        Generate strategy comparison report
 
-        包含多个图表展示策略对比结果:
-        - 核心指标对比（2x3 布局）
-        - 策略排名（按夏普比率）
-        - 权益曲线对比（Top 5）
+        Contains multiple charts displaying strategy comparison results:
+        - Core metrics comparison (2x3 layout)
+        - Strategy ranking (by Sharpe ratio)
+        - Equity curve comparison (Top 5)
 
         Args:
-            results: Dict[str, BacktestResult] - 策略结果字典
-            coin: 币种
-            output_dir: 输出目录
-            days: 回测天数
-            interval: 时间粒度
+            results: Dict[str, BacktestResult] - strategy results dictionary
+            coin: Coin symbol
+            output_dir: Output directory
+            days: Backtest days
+            interval: Time interval
 
         Returns:
-            生成的文件路径列表
+            List of generated file paths
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
 
-        # 文件命名格式: comparison_{type}_{coin}_{days}d_{interval}_{timestamp}.png
+        # File naming format: comparison_{type}_{coin}_{days}d_{interval}_{timestamp}.png
         generated_files = []
 
-        # 1. 核心指标对比
+        # 1. Core metrics comparison
         fig1 = self.plot_metrics_comparison(
             results,
             save_path=f"{output_dir}/comparison_metrics_{coin}_{days}d_{interval}_{timestamp}.png",
@@ -132,7 +132,7 @@ class ReportMixin:
         generated_files.append(f"{output_dir}/comparison_metrics_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig1)
 
-        # 2. 策略排名
+        # 2. Strategy ranking
         fig2 = self.plot_strategy_ranking(
             results,
             metric="sharpe_ratio",
@@ -142,7 +142,7 @@ class ReportMixin:
         generated_files.append(f"{output_dir}/comparison_ranking_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig2)
 
-        # 3. 权益曲线对比
+        # 3. Equity curve comparison
         fig3 = self.plot_equity_comparison(
             results,
             save_path=f"{output_dir}/comparison_equity_{coin}_{days}d_{interval}_{timestamp}.png",
@@ -152,6 +152,6 @@ class ReportMixin:
         generated_files.append(f"{output_dir}/comparison_equity_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig3)
 
-        logger.info(f"✅ 对比报告已生成: {output_dir}/")
+        logger.info(f"✅ Comparison report generated: {output_dir}/")
 
         return generated_files
