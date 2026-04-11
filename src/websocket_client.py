@@ -134,10 +134,13 @@ class BinanceWebSocketClient:
 
             websocket.enableTrace(False)
 
-            # Create SSL context that works behind firewalls/proxies
+            # SSL: 仅在环境变量 CRYPTO_DISABLE_SSL=1 时禁用验证
+            import os
             ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
+            if os.environ.get("CRYPTO_DISABLE_SSL") == "1":
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                logger.warning("⚠️  WebSocket SSL验证已禁用 (CRYPTO_DISABLE_SSL=1)")
 
             self.ws = websocket.WebSocketApp(
                 self._get_stream_url(use_port_443=True),

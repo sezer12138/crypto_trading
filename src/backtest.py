@@ -39,6 +39,14 @@ logger = logging.getLogger(__name__)
 # 确保日志目录存在
 Path("logs").mkdir(parents=True, exist_ok=True)
 
+# 回测常量
+SIGNAL_BUY = 1
+SIGNAL_SELL = -1
+SIGNAL_HOLD = 0
+RISK_FREE_RATE = 0.02  # 无风险利率 2%
+DAYS_PER_YEAR = 365
+DAYS_PER_MONTH = 30
+
 
 @dataclass
 class Trade:
@@ -185,15 +193,14 @@ class BacktestResult:
             return {}
         
         # 年化收益
-        annual_return = ((1 + total_return / 100) ** (365 / days) - 1) * 100
-        
+        annual_return = ((1 + total_return / 100) ** (DAYS_PER_YEAR / days) - 1) * 100
+
         # 年化波动率
-        volatility = returns.std() * np.sqrt(365) * 100
-        
-        # 夏普比率 (假设无风险利率 2%)
-        risk_free_rate = 0.02
+        volatility = returns.std() * np.sqrt(DAYS_PER_YEAR) * 100
+
+        # 夏普比率
         if volatility > 0:
-            sharpe_ratio = (annual_return / 100 - risk_free_rate) / (volatility / 100)
+            sharpe_ratio = (annual_return / 100 - RISK_FREE_RATE) / (volatility / 100)
         else:
             sharpe_ratio = 0.0
         
@@ -218,7 +225,7 @@ class BacktestResult:
         
         # 交易统计
         num_trades = len(self.trades)
-        trades_per_month = num_trades / (days / 30) if days > 0 else 0
+        trades_per_month = num_trades / (days / DAYS_PER_MONTH) if days > 0 else 0
         
         self.metrics = {
             "total_return_pct": round(total_return, 2),
@@ -345,34 +352,36 @@ class BacktestEngine:
         if "signal" not in df.columns:
             raise ValueError("策略未生成 'signal' 列")
         
-        # 初始化权益曲线
-        equity_curve = []
-        
+        # 预提取数组以避免 iterrows() 的开销
+        timestamps = df.index
+        prices = df["close"].values
+        signals = df["signal"].values.astype(int)
+        equity_curve = np.empty(len(df))
+
         logger.info(f"📊 开始回测 {coin}...")
         logger.info(f"   策略: {strategy.name}")
         logger.info(f"   数据点数: {len(df)}")
-        
-        for timestamp, row in df.iterrows():
-            price = row["close"]
-            signal = int(row["signal"])
-            
+
+        for i in range(len(df)):
+            timestamp = timestamps[i]
+            price = prices[i]
+            signal = signals[i]
+
             # 当前总资产
             total_value = self.cash + self.position * price
-            equity_curve.append(total_value)
-            
+            equity_curve[i] = total_value
+
             # 决策逻辑
-            if signal == 1 and self.position == 0:
-                # 买入信号
-                self._execute_buy(timestamp, price, coin, result, row)
-                
-            elif signal == -1 and self.position > 0:
-                # 卖出信号
-                self._execute_sell(timestamp, price, coin, result, row)
-            
+            if signal == SIGNAL_BUY and self.position == 0:
+                self._execute_buy(timestamp, price, coin, result, df.iloc[i])
+
+            elif signal == SIGNAL_SELL and self.position > 0:
+                self._execute_sell(timestamp, price, coin, result, df.iloc[i])
+
             # 记录每一步状态
             result.add_decision(
                 timestamp=timestamp,
-                decision="hold" if signal == 0 else ("buy" if signal == 1 else "sell"),
+                decision="hold" if signal == SIGNAL_HOLD else ("buy" if signal == SIGNAL_BUY else "sell"),
                 reason=f"Signal: {signal}, Price: {price:.2f}, "
                        f"Cash: {self.cash:.2f}, Position: {self.position:.6f}",
                 price=price,
@@ -391,7 +400,7 @@ class BacktestEngine:
             )
         
         # 计算结果
-        result.equity_curve = pd.Series(equity_curve, index=df.index)
+        result.equity_curve = pd.Series(equity_curve, index=timestamps)
         result.daily_returns = result.equity_curve.pct_change().dropna()
         result.cumulative_returns = (
             result.equity_curve / result.equity_curve.iloc[0] - 1

@@ -13,39 +13,75 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# 项目根目录（基于模块位置，避免依赖 CWD）
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_DATA_RAW_DIR = _PROJECT_ROOT / "data" / "raw"
+_DATA_PROCESSED_DIR = _PROJECT_ROOT / "data" / "processed"
+_LOGS_DIR = _PROJECT_ROOT / "logs"
+_CONFIG_DIR = _PROJECT_ROOT / "config"
+
+
+def _safe_filename(name: str) -> str:
+    """只保留安全字符，防止路径遍历。"""
+    return "".join(c for c in name if c.isalnum() or c in "._-")
+
 
 def ensure_directories():
     """Ensure all required directories exist."""
-    dirs = ["../data/raw", "../data/processed", "../logs", "../config"]
-    for dir_path in dirs:
-        Path(dir_path).mkdir(parents=True, exist_ok=True)
+    for dir_path in [_DATA_RAW_DIR, _DATA_PROCESSED_DIR, _LOGS_DIR, _CONFIG_DIR]:
+        dir_path.mkdir(parents=True, exist_ok=True)
 
 
-def save_to_json(data: Dict, filename: str, directory: str = "../data/raw"):
-    """Save data to JSON file."""
+def save_to_json(data: Dict, filename: str, directory: str = None) -> str:
+    """Save data to JSON file.
+
+    Args:
+        data: Data to save
+        filename: Base filename (will be sanitized)
+        directory: Target directory (defaults to data/raw under project root)
+
+    Returns:
+        Filepath on success, None on failure
+    """
     try:
+        dir_path = Path(directory).resolve() if directory else _DATA_RAW_DIR
+        dir_path.mkdir(parents=True, exist_ok=True)
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = f"{directory}/{filename}_{timestamp}.json"
+        safe_name = _safe_filename(filename)
+        filepath = dir_path / f"{safe_name}_{timestamp}.json"
 
         with open(filepath, "w") as f:
             json.dump(data, f, indent=2)
 
         logger.info(f"Data saved to {filepath}")
-        return filepath
+        return str(filepath)
 
     except Exception as e:
         logger.error(f"Error saving to JSON: {e}")
         return None
 
 
-def save_to_csv(data: Dict, filename: str, directory: str = "../data/raw"):
-    """Save data to CSV file."""
-    try:
-        timestamp = datetime.now().strftime("%Y%m%d")
-        filepath = f"{directory}/{filename}_{timestamp}.csv"
+def save_to_csv(data: Dict, filename: str, directory: str = None) -> str:
+    """Save data to CSV file.
 
-        # Check if file exists to determine if we need headers
-        file_exists = os.path.exists(filepath)
+    Args:
+        data: Data to save
+        filename: Base filename (will be sanitized)
+        directory: Target directory (defaults to data/raw under project root)
+
+    Returns:
+        Filepath on success, None on failure
+    """
+    try:
+        dir_path = Path(directory).resolve() if directory else _DATA_RAW_DIR
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d")
+        safe_name = _safe_filename(filename)
+        filepath = dir_path / f"{safe_name}_{timestamp}.csv"
+
+        file_exists = filepath.exists()
 
         with open(filepath, "a", newline="") as f:
             if data:
@@ -61,7 +97,7 @@ def save_to_csv(data: Dict, filename: str, directory: str = "../data/raw"):
                     writer.writerow(coin_data)
 
         logger.info(f"Data appended to {filepath}")
-        return filepath
+        return str(filepath)
 
     except Exception as e:
         logger.error(f"Error saving to CSV: {e}")
@@ -138,11 +174,13 @@ def generate_alert(coin: str, current_price: float, reference_price: float, thre
     return None
 
 
-def load_config(config_path: str = "../config/settings.yaml") -> Dict:
+def load_config(config_path: str = None) -> Dict:
     """Load configuration file."""
     try:
         import yaml
 
+        if config_path is None:
+            config_path = str(_CONFIG_DIR / "settings.yaml")
         with open(config_path, "r") as f:
             return yaml.safe_load(f)
     except Exception as e:

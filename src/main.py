@@ -86,7 +86,7 @@ Examples:
 def run_rest_mode(args):
     """Run in REST API polling mode."""
     coins = [c.strip() for c in args.coins.split(",")]
-    fetcher = CryptoDataFetcher(verify_ssl=False)
+    fetcher = CryptoDataFetcher()
     fetcher.coins = coins
 
     # CoinGecko 需要更长的间隔

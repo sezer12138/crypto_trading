@@ -140,6 +140,53 @@ STRATEGY_DESCRIPTIONS = {
 class HTMLReportGenerator:
     """HTML 报告生成器"""
 
+    # 共享 CSS 样式（单策略和对比报告共用）
+    _SHARED_CSS = """
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e4e4e4; min-height: 100vh; padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; padding: 30px 0; border-bottom: 2px solid #0f3460; margin-bottom: 30px; }
+        .header h1 { font-size: 2.5em; color: #00d9ff; margin-bottom: 10px; text-shadow: 0 0 20px rgba(0, 217, 255, 0.3); }
+        .header .subtitle { color: #888; font-size: 1.1em; }
+        .card {
+            background: rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 25px;
+            margin-bottom: 25px; border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px);
+        }
+        .card h2 {
+            color: #00d9ff; margin-bottom: 20px; padding-bottom: 10px;
+            border-bottom: 1px solid rgba(0, 217, 255, 0.3); display: flex; align-items: center; gap: 10px;
+        }
+        .card h2::before { content: ''; width: 4px; height: 24px; background: #00d9ff; border-radius: 2px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+        th { background: rgba(0, 217, 255, 0.1); color: #00d9ff; font-weight: 600; }
+        tr:hover { background: rgba(255, 255, 255, 0.05); }
+        .positive { color: #00ff88; } .negative { color: #ff4757; } .neutral { color: #00d9ff; }
+        .chart-container { text-align: center; margin: 20px 0; }
+        .chart-container img { max-width: 100%; border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+        .conclusion {
+            background: linear-gradient(135deg, rgba(0, 217, 255, 0.1) 0%, rgba(0, 255, 136, 0.1) 100%);
+            border-left: 4px solid #00d9ff; padding: 20px; border-radius: 0 10px 10px 0;
+        }
+        .conclusion h3 { color: #00d9ff; margin-bottom: 15px; }
+        .conclusion p { line-height: 1.8; color: #ccc; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.85em; font-weight: 500; }
+        .badge-success { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
+        .badge-warning { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+        .badge-danger { background: rgba(255, 71, 87, 0.2); color: #ff4757; }
+        .footer { text-align: center; padding: 30px 0; color: #666; border-top: 1px solid rgba(255, 255, 255, 0.1); margin-top: 40px; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .metric-item { background: rgba(0, 0, 0, 0.2); padding: 20px; border-radius: 10px; text-align: center; transition: transform 0.3s ease; }
+        .metric-item:hover { transform: translateY(-5px); }
+        .metric-value { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
+        .metric-label { color: #888; font-size: 0.9em; }
+        @media (max-width: 768px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } .summary-stats { grid-template-columns: repeat(2, 1fr); } }
+    """
+
     def __init__(self):
         self.timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -272,22 +319,20 @@ class HTMLReportGenerator:
         charts_base64: Dict[str, str],
     ) -> str:
         """生成单策略报告 HTML 内容"""
-
         metrics = result.metrics
         trades = result.trades
-
-        # 计算额外统计
         buy_trades = [t for t in trades if t.action == "buy"]
         sell_trades = [t for t in trades if t.action == "sell"]
-
-        # 计算平均持仓时间
         avg_holding_time = self._calculate_avg_holding_time(trades)
-
-        # 计算最大单笔盈亏
         max_profit, max_loss = self._calculate_max_profit_loss(trades)
-
-        # 生成结论
         conclusion = self._generate_conclusion(metrics, strategy_name)
+
+        metrics_html = self._build_metrics_card(metrics)
+        strategy_html = self._build_strategy_info_card(strategy_info, strategy_name, coin, days, interval, capital)
+        stats_html = self._build_trade_stats_card(metrics, buy_trades, sell_trades, avg_holding_time, max_profit, max_loss, result)
+        charts_html = self._generate_charts_html(charts_base64)
+        trades_html = self._build_trades_card(trades)
+        conclusion_html = self._build_conclusion_card(conclusion)
 
         html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -295,369 +340,29 @@ class HTMLReportGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>回测报告 - {strategy_name.upper()} - {coin.upper()}</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #e4e4e4;
-            min-height: 100vh;
-            padding: 20px;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-        }}
-        .header {{
-            text-align: center;
-            padding: 30px 0;
-            border-bottom: 2px solid #0f3460;
-            margin-bottom: 30px;
-        }}
-        .header h1 {{
-            font-size: 2.5em;
-            color: #00d9ff;
-            margin-bottom: 10px;
-            text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
-        }}
-        .header .subtitle {{
-            color: #888;
-            font-size: 1.1em;
-        }}
-        .card {{
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 25px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-        }}
-        .card h2 {{
-            color: #00d9ff;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid rgba(0, 217, 255, 0.3);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }}
-        .card h2::before {{
-            content: '';
-            width: 4px;
-            height: 24px;
-            background: #00d9ff;
-            border-radius: 2px;
-        }}
-        .metrics-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-        }}
-        .metric-item {{
-            background: rgba(0, 0, 0, 0.2);
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-            transition: transform 0.3s ease;
-        }}
-        .metric-item:hover {{
-            transform: translateY(-5px);
-        }}
-        .metric-value {{
-            font-size: 2em;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }}
-        .metric-value.positive {{ color: #00ff88; }}
-        .metric-value.negative {{ color: #ff4757; }}
-        .metric-value.neutral {{ color: #00d9ff; }}
-        .metric-label {{
-            color: #888;
-            font-size: 0.9em;
-        }}
-        .strategy-info {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-        }}
-        .info-item {{
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }}
-        .info-label {{
-            color: #888;
-        }}
-        .info-value {{
-            color: #fff;
-            font-weight: 500;
-        }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }}
-        th, td {{
-            padding: 12px 15px;
-            text-align: left;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }}
-        th {{
-            background: rgba(0, 217, 255, 0.1);
-            color: #00d9ff;
-            font-weight: 600;
-        }}
-        tr:hover {{
-            background: rgba(255, 255, 255, 0.05);
-        }}
-        .buy {{ color: #00ff88; }}
-        .sell {{ color: #ff4757; }}
-        .chart-container {{
-            text-align: center;
-            margin: 20px 0;
-        }}
-        .chart-container img {{
-            max-width: 100%;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }}
-        .conclusion {{
-            background: linear-gradient(135deg, rgba(0, 217, 255, 0.1) 0%, rgba(0, 255, 136, 0.1) 100%);
-            border-left: 4px solid #00d9ff;
-            padding: 20px;
-            border-radius: 0 10px 10px 0;
-        }}
-        .conclusion h3 {{
-            color: #00d9ff;
-            margin-bottom: 15px;
-        }}
-        .conclusion p {{
-            line-height: 1.8;
-            color: #ccc;
-        }}
-        .badge {{
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            font-weight: 500;
-        }}
-        .badge-success {{ background: rgba(0, 255, 136, 0.2); color: #00ff88; }}
-        .badge-warning {{ background: rgba(255, 193, 7, 0.2); color: #ffc107; }}
-        .badge-danger {{ background: rgba(255, 71, 87, 0.2); color: #ff4757; }}
-        .footer {{
-            text-align: center;
-            padding: 30px 0;
-            color: #666;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            margin-top: 40px;
-        }}
-        .summary-stats {{
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-            margin-top: 15px;
-        }}
-        .summary-stat {{
-            background: rgba(0, 0, 0, 0.2);
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-        }}
-        .summary-stat .value {{
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #00d9ff;
-        }}
-        .summary-stat .label {{
-            font-size: 0.85em;
-            color: #888;
-            margin-top: 5px;
-        }}
-        @media (max-width: 768px) {{
-            .metrics-grid {{
-                grid-template-columns: repeat(2, 1fr);
-            }}
-            .summary-stats {{
-                grid-template-columns: repeat(2, 1fr);
-            }}
-        }}
+    <style>{self._SHARED_CSS}
+        .strategy-info {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }}
+        .info-item {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }}
+        .info-label {{ color: #888; }} .info-value {{ color: #fff; font-weight: 500; }}
+        .summary-stats {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 15px; }}
+        .summary-stat {{ background: rgba(0, 0, 0, 0.2); padding: 15px; border-radius: 8px; text-align: center; }}
+        .summary-stat .value {{ font-size: 1.3em; font-weight: bold; color: #00d9ff; }}
+        .summary-stat .label {{ font-size: 0.85em; color: #888; margin-top: 5px; }}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>📊 回测报告</h1>
-            <div class="subtitle">
-                {strategy_info.get('name', strategy_name)} | {coin.upper()} | {days} 天 | {interval} 周期
-            </div>
-            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">
-                生成时间: {self.timestamp}
-            </div>
+            <div class="subtitle">{strategy_info.get('name', strategy_name)} | {coin.upper()} | {days} 天 | {interval} 周期</div>
+            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">生成时间: {self.timestamp}</div>
         </div>
-
-        <!-- 核心指标 -->
-        <div class="card">
-            <h2>核心绩效指标</h2>
-            <div class="metrics-grid">
-                <div class="metric-item">
-                    <div class="metric-value {'positive' if metrics.get('total_return_pct', 0) >= 0 else 'negative'}">
-                        {metrics.get('total_return_pct', 0):.2f}%
-                    </div>
-                    <div class="metric-label">总收益率</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value {'positive' if metrics.get('annual_return_pct', 0) >= 0 else 'negative'}">
-                        {metrics.get('annual_return_pct', 0):.2f}%
-                    </div>
-                    <div class="metric-label">年化收益率</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value neutral">{metrics.get('sharpe_ratio', 0):.2f}</div>
-                    <div class="metric-label">夏普比率</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value negative">{metrics.get('max_drawdown_pct', 0):.2f}%</div>
-                    <div class="metric-label">最大回撤</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value neutral">{metrics.get('win_rate_pct', 0):.2f}%</div>
-                    <div class="metric-label">胜率</div>
-                </div>
-                <div class="metric-item">
-                    <div class="metric-value neutral">{metrics.get('total_trades', 0)}</div>
-                    <div class="metric-label">总交易次数</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 策略信息 -->
-        <div class="card">
-            <h2>策略详情</h2>
-            <div class="strategy-info">
-                <div class="info-item">
-                    <span class="info-label">策略名称</span>
-                    <span class="info-value">{strategy_info.get('name', strategy_name)}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">英文名称</span>
-                    <span class="info-value">{strategy_info.get('name_en', strategy_name)}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">策略类型</span>
-                    <span class="info-value">{strategy_info.get('type', 'N/A')}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">风险等级</span>
-                    <span class="info-value">{strategy_info.get('risk_level', 'N/A')}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">适用市场</span>
-                    <span class="info-value">{strategy_info.get('suitable_market', 'N/A')}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">回测币种</span>
-                    <span class="info-value">{coin.upper()}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">回测天数</span>
-                    <span class="info-value">{days} 天</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">K线周期</span>
-                    <span class="info-value">{interval}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">初始资金</span>
-                    <span class="info-value">${capital:,.2f}</span>
-                </div>
-            </div>
-            <div style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px;">
-                <strong style="color: #00d9ff;">策略描述：</strong>
-                <p style="margin-top: 10px; color: #ccc; line-height: 1.6;">
-                    {strategy_info.get('description', '暂无描述')}
-                </p>
-            </div>
-        </div>
-
-        <!-- 交易统计 -->
-        <div class="card">
-            <h2>交易统计</h2>
-            <div class="summary-stats">
-                <div class="summary-stat">
-                    <div class="value">{len(buy_trades)}</div>
-                    <div class="label">买入次数</div>
-                </div>
-                <div class="summary-stat">
-                    <div class="value">{len(sell_trades)}</div>
-                    <div class="label">卖出次数</div>
-                </div>
-                <div class="summary-stat">
-                    <div class="value">{avg_holding_time}</div>
-                    <div class="label">平均持仓时间</div>
-                </div>
-                <div class="summary-stat">
-                    <div class="value" style="color: #00ff88;">+{max_profit:.2f}%</div>
-                    <div class="label">最大单笔盈利</div>
-                </div>
-                <div class="summary-stat">
-                    <div class="value" style="color: #ff4757;">{max_loss:.2f}%</div>
-                    <div class="label">最大单笔亏损</div>
-                </div>
-                <div class="summary-stat">
-                    <div class="value">{metrics.get('trades_per_month', 0):.1f}</div>
-                    <div class="label">月均交易次数</div>
-                </div>
-                <div class="summary-stat">
-                    <div class="value">{metrics.get('volatility_pct', 0):.2f}%</div>
-                    <div class="label">年化波动率</div>
-                </div>
-                <div class="summary-stat">
-                    <div class="value">${result.equity_curve.iloc[-1]:,.2f}</div>
-                    <div class="label">最终资产</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 图表 -->
-        {self._generate_charts_html(charts_base64)}
-
-        <!-- 交易记录 -->
-        <div class="card">
-            <h2>交易记录详情</h2>
-            <div style="overflow-x: auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>时间</th>
-                            <th>操作</th>
-                            <th>价格</th>
-                            <th>数量</th>
-                            <th>金额</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {self._generate_trades_table(trades)}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 总结与结论 -->
-        <div class="card">
-            <h2>总结与结论</h2>
-            <div class="conclusion">
-                <h3>📈 回测分析结论</h3>
-                {conclusion}
-            </div>
-        </div>
-
+        {metrics_html}
+        {strategy_html}
+        {stats_html}
+        {charts_html}
+        {trades_html}
+        {conclusion_html}
         <div class="footer">
             <p>⚠️ 免责声明：历史回测结果不代表未来收益，投资有风险，入市需谨慎。</p>
             <p style="margin-top: 10px;">Generated by Crypto Trading Backtest System | {self.timestamp}</p>
@@ -666,6 +371,102 @@ class HTMLReportGenerator:
 </body>
 </html>"""
         return html
+
+    def _build_metrics_card(self, metrics: Dict) -> str:
+        """构建核心指标卡片"""
+        m = metrics
+        return f"""
+        <div class="card">
+            <h2>核心绩效指标</h2>
+            <div class="metrics-grid">
+                <div class="metric-item">
+                    <div class="metric-value {'positive' if m.get('total_return_pct', 0) >= 0 else 'negative'}">{m.get('total_return_pct', 0):.2f}%</div>
+                    <div class="metric-label">总收益率</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value {'positive' if m.get('annual_return_pct', 0) >= 0 else 'negative'}">{m.get('annual_return_pct', 0):.2f}%</div>
+                    <div class="metric-label">年化收益率</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value neutral">{m.get('sharpe_ratio', 0):.2f}</div>
+                    <div class="metric-label">夏普比率</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value negative">{m.get('max_drawdown_pct', 0):.2f}%</div>
+                    <div class="metric-label">最大回撤</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value neutral">{m.get('win_rate_pct', 0):.2f}%</div>
+                    <div class="metric-label">胜率</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value neutral">{m.get('total_trades', 0)}</div>
+                    <div class="metric-label">总交易次数</div>
+                </div>
+            </div>
+        </div>"""
+
+    def _build_strategy_info_card(self, strategy_info: Dict, strategy_name: str, coin: str, days: int, interval: str, capital: float) -> str:
+        """构建策略详情卡片"""
+        si = strategy_info
+        return f"""
+        <div class="card">
+            <h2>策略详情</h2>
+            <div class="strategy-info">
+                <div class="info-item"><span class="info-label">策略名称</span><span class="info-value">{si.get('name', strategy_name)}</span></div>
+                <div class="info-item"><span class="info-label">英文名称</span><span class="info-value">{si.get('name_en', strategy_name)}</span></div>
+                <div class="info-item"><span class="info-label">策略类型</span><span class="info-value">{si.get('type', 'N/A')}</span></div>
+                <div class="info-item"><span class="info-label">风险等级</span><span class="info-value">{si.get('risk_level', 'N/A')}</span></div>
+                <div class="info-item"><span class="info-label">适用市场</span><span class="info-value">{si.get('suitable_market', 'N/A')}</span></div>
+                <div class="info-item"><span class="info-label">回测币种</span><span class="info-value">{coin.upper()}</span></div>
+                <div class="info-item"><span class="info-label">回测天数</span><span class="info-value">{days} 天</span></div>
+                <div class="info-item"><span class="info-label">K线周期</span><span class="info-value">{interval}</span></div>
+                <div class="info-item"><span class="info-label">初始资金</span><span class="info-value">${capital:,.2f}</span></div>
+            </div>
+            <div style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                <strong style="color: #00d9ff;">策略描述：</strong>
+                <p style="margin-top: 10px; color: #ccc; line-height: 1.6;">{si.get('description', '暂无描述')}</p>
+            </div>
+        </div>"""
+
+    def _build_trade_stats_card(self, metrics: Dict, buy_trades: List, sell_trades: List, avg_holding_time: str, max_profit: float, max_loss: float, result: Any) -> str:
+        """构建交易统计卡片"""
+        m = metrics
+        return f"""
+        <div class="card">
+            <h2>交易统计</h2>
+            <div class="summary-stats">
+                <div class="summary-stat"><div class="value">{len(buy_trades)}</div><div class="label">买入次数</div></div>
+                <div class="summary-stat"><div class="value">{len(sell_trades)}</div><div class="label">卖出次数</div></div>
+                <div class="summary-stat"><div class="value">{avg_holding_time}</div><div class="label">平均持仓时间</div></div>
+                <div class="summary-stat"><div class="value" style="color: #00ff88;">+{max_profit:.2f}%</div><div class="label">最大单笔盈利</div></div>
+                <div class="summary-stat"><div class="value" style="color: #ff4757;">{max_loss:.2f}%</div><div class="label">最大单笔亏损</div></div>
+                <div class="summary-stat"><div class="value">{m.get('trades_per_month', 0):.1f}</div><div class="label">月均交易次数</div></div>
+                <div class="summary-stat"><div class="value">{m.get('volatility_pct', 0):.2f}%</div><div class="label">年化波动率</div></div>
+                <div class="summary-stat"><div class="value">${result.equity_curve.iloc[-1]:,.2f}</div><div class="label">最终资产</div></div>
+            </div>
+        </div>"""
+
+    def _build_trades_card(self, trades: List) -> str:
+        """构建交易记录卡片"""
+        return f"""
+        <div class="card">
+            <h2>交易记录详情</h2>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead><tr><th>#</th><th>时间</th><th>操作</th><th>价格</th><th>数量</th><th>金额</th></tr></thead>
+                    <tbody>{self._generate_trades_table(trades)}</tbody>
+                </table>
+            </div>
+        </div>"""
+
+    def _build_conclusion_card(self, conclusion: str) -> str:
+        """构建结论卡片"""
+        return f"""
+        <div class="card">
+            <h2>总结与结论</h2>
+            <div class="conclusion"><h3>📈 回测分析结论</h3>{conclusion}</div>
+        </div>"""
 
     def _generate_comparison_html(
         self,
@@ -677,25 +478,18 @@ class HTMLReportGenerator:
         charts_base64: Dict[str, str],
     ) -> str:
         """生成多策略对比报告 HTML 内容"""
-
-        # 按夏普比率排序
-        sorted_results = sorted(
-            results.items(),
-            key=lambda x: x[1].metrics.get("sharpe_ratio", 0),
-            reverse=True,
-        )
-
+        sorted_results = sorted(results.items(), key=lambda x: x[1].metrics.get("sharpe_ratio", 0), reverse=True)
         best_strategy = sorted_results[0][0] if sorted_results else "N/A"
         best_metrics = sorted_results[0][1].metrics if sorted_results else {}
-
-        # 生成对比表格
         comparison_table = self._generate_comparison_table(sorted_results)
-
-        # 生成策略详情卡片
         strategy_cards = self._generate_strategy_cards(sorted_results[:5])
-
-        # 生成结论
         conclusion = self._generate_comparison_conclusion(sorted_results, coin, days)
+
+        best_html = self._build_best_strategy_card(best_strategy, best_metrics)
+        table_html = self._build_comparison_table_card(comparison_table)
+        charts_html = self._generate_comparison_charts_html(charts_base64)
+        cards_html = self._build_top_cards(strategy_cards)
+        conclusion_html = self._build_conclusion_card(conclusion)
 
         html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -703,301 +497,53 @@ class HTMLReportGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>策略对比报告 - {coin.upper()}</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #e4e4e4;
-            min-height: 100vh;
-            padding: 20px;
-        }}
-        .container {{
-            max-width: 1400px;
-            margin: 0 auto;
-        }}
-        .header {{
-            text-align: center;
-            padding: 30px 0;
-            border-bottom: 2px solid #0f3460;
-            margin-bottom: 30px;
-        }}
-        .header h1 {{
-            font-size: 2.5em;
-            color: #00d9ff;
-            margin-bottom: 10px;
-            text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
-        }}
-        .header .subtitle {{
-            color: #888;
-            font-size: 1.1em;
-        }}
-        .card {{
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 25px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-        }}
-        .card h2 {{
-            color: #00d9ff;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid rgba(0, 217, 255, 0.3);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }}
-        .card h2::before {{
-            content: '';
-            width: 4px;
-            height: 24px;
-            background: #00d9ff;
-            border-radius: 2px;
-        }}
+    <style>{self._SHARED_CSS}
+        .container {{ max-width: 1400px; margin: 0 auto; }}
+        th, td {{ text-align: center; }}
+        th {{ position: sticky; top: 0; }}
         .best-strategy {{
             background: linear-gradient(135deg, rgba(0, 255, 136, 0.1) 0%, rgba(0, 217, 255, 0.1) 100%);
-            border: 2px solid rgba(0, 255, 136, 0.3);
-            text-align: center;
-            padding: 30px;
+            border: 2px solid rgba(0, 255, 136, 0.3); text-align: center; padding: 30px;
         }}
-        .best-strategy h3 {{
-            color: #00ff88;
-            font-size: 1.5em;
-            margin-bottom: 15px;
-        }}
-        .best-strategy .name {{
-            font-size: 2.5em;
-            color: #fff;
-            font-weight: bold;
-            margin: 10px 0;
-        }}
-        .best-strategy .metrics {{
-            display: flex;
-            justify-content: center;
-            gap: 40px;
-            margin-top: 20px;
-        }}
-        .best-strategy .metric {{
-            text-align: center;
-        }}
-        .best-strategy .metric .value {{
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #00ff88;
-        }}
-        .best-strategy .metric .label {{
-            color: #888;
-            font-size: 0.9em;
-        }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }}
-        th, td {{
-            padding: 12px 15px;
-            text-align: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }}
-        th {{
-            background: rgba(0, 217, 255, 0.1);
-            color: #00d9ff;
-            font-weight: 600;
-            position: sticky;
-            top: 0;
-        }}
-        tr:hover {{
-            background: rgba(255, 255, 255, 0.05);
-        }}
-        tr.best {{
-            background: rgba(0, 255, 136, 0.1);
-        }}
-        .positive {{ color: #00ff88; }}
-        .negative {{ color: #ff4757; }}
-        .neutral {{ color: #00d9ff; }}
+        .best-strategy h3 {{ color: #00ff88; font-size: 1.5em; margin-bottom: 15px; }}
+        .best-strategy .name {{ font-size: 2.5em; color: #fff; font-weight: bold; margin: 10px 0; }}
+        .best-strategy .metrics {{ display: flex; justify-content: center; gap: 40px; margin-top: 20px; }}
+        .best-strategy .metric {{ text-align: center; }}
+        .best-strategy .metric .value {{ font-size: 1.8em; font-weight: bold; color: #00ff88; }}
+        .best-strategy .metric .label {{ color: #888; font-size: 0.9em; }}
+        tr.best {{ background: rgba(0, 255, 136, 0.1); }}
         .rank {{
-            display: inline-block;
-            width: 30px;
-            height: 30px;
-            line-height: 30px;
-            border-radius: 50%;
-            background: rgba(0, 217, 255, 0.2);
-            color: #00d9ff;
-            font-weight: bold;
+            display: inline-block; width: 30px; height: 30px; line-height: 30px;
+            border-radius: 50%; background: rgba(0, 217, 255, 0.2); color: #00d9ff; font-weight: bold;
         }}
         .rank-1 {{ background: rgba(255, 215, 0, 0.3); color: #ffd700; }}
         .rank-2 {{ background: rgba(192, 192, 192, 0.3); color: #c0c0c0; }}
         .rank-3 {{ background: rgba(205, 127, 50, 0.3); color: #cd7f32; }}
-        .chart-container {{
-            text-align: center;
-            margin: 20px 0;
-        }}
-        .chart-container img {{
-            max-width: 100%;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }}
-        .strategy-cards {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-        }}
-        .strategy-card {{
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 10px;
-            padding: 20px;
-            border-left: 4px solid #00d9ff;
-        }}
-        .strategy-card.top-1 {{
-            border-left-color: #ffd700;
-            background: rgba(255, 215, 0, 0.05);
-        }}
-        .strategy-card.top-2 {{
-            border-left-color: #c0c0c0;
-        }}
-        .strategy-card.top-3 {{
-            border-left-color: #cd7f32;
-        }}
-        .strategy-card h4 {{
-            color: #fff;
-            margin-bottom: 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-        .strategy-card .mini-metrics {{
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-        }}
-        .strategy-card .mini-metric {{
-            text-align: center;
-            padding: 8px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 5px;
-        }}
-        .strategy-card .mini-metric .value {{
-            font-weight: bold;
-        }}
-        .strategy-card .mini-metric .label {{
-            font-size: 0.75em;
-            color: #888;
-        }}
-        .conclusion {{
-            background: linear-gradient(135deg, rgba(0, 217, 255, 0.1) 0%, rgba(0, 255, 136, 0.1) 100%);
-            border-left: 4px solid #00d9ff;
-            padding: 20px;
-            border-radius: 0 10px 10px 0;
-        }}
-        .conclusion h3 {{
-            color: #00d9ff;
-            margin-bottom: 15px;
-        }}
-        .conclusion p {{
-            line-height: 1.8;
-            color: #ccc;
-        }}
-        .footer {{
-            text-align: center;
-            padding: 30px 0;
-            color: #666;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            margin-top: 40px;
-        }}
-        @media (max-width: 768px) {{
-            .best-strategy .metrics {{
-                flex-direction: column;
-                gap: 20px;
-            }}
-        }}
+        .strategy-cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }}
+        .strategy-card {{ background: rgba(0, 0, 0, 0.2); border-radius: 10px; padding: 20px; border-left: 4px solid #00d9ff; }}
+        .strategy-card.top-1 {{ border-left-color: #ffd700; background: rgba(255, 215, 0, 0.05); }}
+        .strategy-card.top-2 {{ border-left-color: #c0c0c0; }}
+        .strategy-card.top-3 {{ border-left-color: #cd7f32; }}
+        .strategy-card h4 {{ color: #fff; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }}
+        .strategy-card .mini-metrics {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }}
+        .strategy-card .mini-metric {{ text-align: center; padding: 8px; background: rgba(0, 0, 0, 0.2); border-radius: 5px; }}
+        .strategy-card .mini-metric .value {{ font-weight: bold; }}
+        .strategy-card .mini-metric .label {{ font-size: 0.75em; color: #888; }}
+        @media (max-width: 768px) {{ .best-strategy .metrics {{ flex-direction: column; gap: 20px; }} }}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>📊 策略对比报告</h1>
-            <div class="subtitle">
-                {coin.upper()} | {days} 天 | {interval} 周期 | {len(results)} 个策略
-            </div>
-            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">
-                生成时间: {self.timestamp}
-            </div>
+            <div class="subtitle">{coin.upper()} | {days} 天 | {interval} 周期 | {len(results)} 个策略</div>
+            <div class="subtitle" style="margin-top: 10px; font-size: 0.9em;">生成时间: {self.timestamp}</div>
         </div>
-
-        <!-- 最佳策略 -->
-        <div class="card best-strategy">
-            <h3>🏆 最佳策略</h3>
-            <div class="name">{STRATEGY_DESCRIPTIONS.get(best_strategy, {}).get('name', best_strategy.upper())}</div>
-            <div class="metrics">
-                <div class="metric">
-                    <div class="value">{'+' if best_metrics.get('total_return_pct', 0) >= 0 else ''}{best_metrics.get('total_return_pct', 0):.2f}%</div>
-                    <div class="label">总收益率</div>
-                </div>
-                <div class="metric">
-                    <div class="value">{best_metrics.get('sharpe_ratio', 0):.2f}</div>
-                    <div class="label">夏普比率</div>
-                </div>
-                <div class="metric">
-                    <div class="value">{best_metrics.get('win_rate_pct', 0):.2f}%</div>
-                    <div class="label">胜率</div>
-                </div>
-                <div class="metric">
-                    <div class="value">{best_metrics.get('max_drawdown_pct', 0):.2f}%</div>
-                    <div class="label">最大回撤</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 策略排名表格 -->
-        <div class="card">
-            <h2>策略排名对比</h2>
-            <div style="overflow-x: auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>排名</th>
-                            <th>策略</th>
-                            <th>总收益</th>
-                            <th>年化收益</th>
-                            <th>夏普比率</th>
-                            <th>最大回撤</th>
-                            <th>胜率</th>
-                            <th>交易次数</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {comparison_table}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 图表 -->
-        {self._generate_comparison_charts_html(charts_base64)}
-
-        <!-- Top 5 策略详情 -->
-        <div class="card">
-            <h2>Top 5 策略详情</h2>
-            <div class="strategy-cards">
-                {strategy_cards}
-            </div>
-        </div>
-
-        <!-- 总结与结论 -->
-        <div class="card">
-            <h2>总结与结论</h2>
-            <div class="conclusion">
-                <h3>📈 策略对比分析结论</h3>
-                {conclusion}
-            </div>
-        </div>
-
+        {best_html}
+        {table_html}
+        {charts_html}
+        {cards_html}
+        {conclusion_html}
         <div class="footer">
             <p>⚠️ 免责声明：历史回测结果不代表未来收益，投资有风险，入市需谨慎。</p>
             <p style="margin-top: 10px;">Generated by Crypto Trading Backtest System | {self.timestamp}</p>
@@ -1006,6 +552,42 @@ class HTMLReportGenerator:
 </body>
 </html>"""
         return html
+
+    def _build_best_strategy_card(self, best_strategy: str, best_metrics: Dict) -> str:
+        """构建最佳策略卡片"""
+        bm = best_metrics
+        return f"""
+        <div class="card best-strategy">
+            <h3>🏆 最佳策略</h3>
+            <div class="name">{STRATEGY_DESCRIPTIONS.get(best_strategy, {}).get('name', best_strategy.upper())}</div>
+            <div class="metrics">
+                <div class="metric"><div class="value">{'+' if bm.get('total_return_pct', 0) >= 0 else ''}{bm.get('total_return_pct', 0):.2f}%</div><div class="label">总收益率</div></div>
+                <div class="metric"><div class="value">{bm.get('sharpe_ratio', 0):.2f}</div><div class="label">夏普比率</div></div>
+                <div class="metric"><div class="value">{bm.get('win_rate_pct', 0):.2f}%</div><div class="label">胜率</div></div>
+                <div class="metric"><div class="value">{bm.get('max_drawdown_pct', 0):.2f}%</div><div class="label">最大回撤</div></div>
+            </div>
+        </div>"""
+
+    def _build_comparison_table_card(self, comparison_table: str) -> str:
+        """构建对比排名表格卡片"""
+        return f"""
+        <div class="card">
+            <h2>策略排名对比</h2>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead><tr><th>排名</th><th>策略</th><th>总收益</th><th>年化收益</th><th>夏普比率</th><th>最大回撤</th><th>胜率</th><th>交易次数</th></tr></thead>
+                    <tbody>{comparison_table}</tbody>
+                </table>
+            </div>
+        </div>"""
+
+    def _build_top_cards(self, strategy_cards: str) -> str:
+        """构建 Top5 策略详情卡片"""
+        return f"""
+        <div class="card">
+            <h2>Top 5 策略详情</h2>
+            <div class="strategy-cards">{strategy_cards}</div>
+        </div>"""
 
     def _generate_charts_html(self, charts_base64: Dict[str, str]) -> str:
         """生成图表 HTML"""
@@ -1140,19 +722,18 @@ class HTMLReportGenerator:
         return ''.join(cards)
 
     def _calculate_avg_holding_time(self, trades: List) -> str:
-        """计算平均持仓时间"""
+        """计算平均持仓时间 — O(n) 单次遍历"""
         if len(trades) < 2:
             return "N/A"
 
         holding_times = []
-        for i in range(len(trades)):
-            if trades[i].action == "sell":
-                # 找到对应的买入
-                for j in range(i - 1, -1, -1):
-                    if trades[j].action == "buy":
-                        delta = trades[i].timestamp - trades[j].timestamp
-                        holding_times.append(delta.total_seconds() / 3600)  # 小时
-                        break
+        last_buy_time = None
+        for trade in trades:
+            if trade.action == "buy":
+                last_buy_time = trade.timestamp
+            elif trade.action == "sell" and last_buy_time is not None:
+                delta = trade.timestamp - last_buy_time
+                holding_times.append(delta.total_seconds() / 3600)
 
         if not holding_times:
             return "N/A"
@@ -1164,20 +745,20 @@ class HTMLReportGenerator:
             return f"{avg_hours:.1f} 小时"
 
     def _calculate_max_profit_loss(self, trades: List) -> tuple:
-        """计算最大单笔盈亏"""
+        """计算最大单笔盈亏 — O(n) 单次遍历"""
         max_profit = 0.0
         max_loss = 0.0
+        last_buy_price = None
 
-        for i in range(len(trades)):
-            if trades[i].action == "sell":
-                for j in range(i - 1, -1, -1):
-                    if trades[j].action == "buy":
-                        profit_pct = (trades[i].price - trades[j].price) / trades[j].price * 100
-                        if profit_pct > max_profit:
-                            max_profit = profit_pct
-                        if profit_pct < max_loss:
-                            max_loss = profit_pct
-                        break
+        for trade in trades:
+            if trade.action == "buy":
+                last_buy_price = trade.price
+            elif trade.action == "sell" and last_buy_price is not None:
+                profit_pct = (trade.price - last_buy_price) / last_buy_price * 100
+                if profit_pct > max_profit:
+                    max_profit = profit_pct
+                if profit_pct < max_loss:
+                    max_loss = profit_pct
 
         return max_profit, max_loss
 

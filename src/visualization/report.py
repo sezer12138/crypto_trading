@@ -4,10 +4,14 @@
 生成完整的回测报告，包含多个图表。
 """
 
+import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
+import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class ReportMixin:
@@ -15,8 +19,8 @@ class ReportMixin:
 
     def create_full_report(
         self,
-        result: object,
-        df,
+        result: Any,
+        df: pd.DataFrame,
         strategy_name: str,
         coin: str,
         output_dir: str = "results",
@@ -43,8 +47,6 @@ class ReportMixin:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # 生成时间戳
-        import pandas as pd
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
 
         # 文件命名格式: {strategy}_{coin}_{days}d_{interval}_{timestamp}_{type}.png
@@ -81,8 +83,7 @@ class ReportMixin:
             generated_files.append(f"{base_name}_monthly.png")
             plt.close(fig3)
 
-        import logging
-        logging.getLogger(__name__).info(
+        logger.info(
             f"✅ 完整报告已生成: {output_dir}/\n   文件: {', '.join(generated_files)}"
         )
 
@@ -90,7 +91,7 @@ class ReportMixin:
 
     def create_comparison_report(
         self,
-        results: Dict[str, object],
+        results: Dict[str, Any],
         coin: str,
         output_dir: str = "results",
         days: int = 730,
@@ -117,8 +118,6 @@ class ReportMixin:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # 生成时间戳
-        import pandas as pd
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
 
         # 文件命名格式: comparison_{type}_{coin}_{days}d_{interval}_{timestamp}.png
@@ -153,7 +152,6 @@ class ReportMixin:
         generated_files.append(f"{output_dir}/comparison_equity_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig3)
 
-        import logging
-        logging.getLogger(__name__).info(f"✅ 对比报告已生成: {output_dir}/")
+        logger.info(f"✅ 对比报告已生成: {output_dir}/")
 
         return generated_files

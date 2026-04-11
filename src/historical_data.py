@@ -38,13 +38,14 @@ class HistoricalDataFetcher:
         # 重试配置
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        # SSL验证 (VPN/代理环境下可能需要关闭)
-        self.verify_ssl = verify_ssl
+        # SSL验证: 仅在环境变量 CRYPTO_DISABLE_SSL=1 时关闭
+        import os
+        self.verify_ssl = verify_ssl and os.environ.get("CRYPTO_DISABLE_SSL") != "1"
 
-        if not verify_ssl:
+        if not self.verify_ssl:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            logger.warning("⚠️  SSL验证已禁用，请确保网络环境安全")
+            logger.warning("⚠️  SSL验证已禁用 (CRYPTO_DISABLE_SSL=1)，请确保网络环境安全")
 
     def fetch_binance_klines(
         self,

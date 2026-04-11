@@ -30,7 +30,7 @@ def forward_fill_position(df: pd.DataFrame) -> pd.DataFrame:
         >>> df['position'].tolist()
         [0, 1, 1, 1, -1, -1]
     """
-    df["position"] = df["signal"].replace(to_replace=0, method="ffill")
+    df["position"] = df["signal"].replace(0, np.nan).ffill().fillna(0).astype(int)
     return df
 
 
