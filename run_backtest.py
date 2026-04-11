@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
 """
-Main Backtest Runner
-主回测程序 - 运行完整的历史回测和策略对比
+Main Backtest Runner - Runs full historical backtests and strategy comparisons
 
 Usage:
-    # 默认回测 BTC 使用多因子策略
+    # Default: backtest BTC with multi-factor strategy
     python run_backtest.py
-    
-    # 回测 ETH 使用均线策略
+
+    # Backtest ETH with MA cross strategy
     python run_backtest.py --coin eth --strategy ma_cross
-    
-    # 回测所有币种
+
+    # Backtest all coins
     python run_backtest.py --coin all
-    
-    # 对比所有策略性能
+
+    # Compare all strategy performance
     python run_backtest.py --coin btc --compare
-    
-    # 使用1小时数据回测2年
+
+    # Backtest 2 years with 1h interval
     python run_backtest.py --interval 1h --days 730 --capital 50000
 
 Options:
-    --coin          币种 (btc, eth, sol, all) [默认: btc]
-    --strategy      交易策略 [默认: multi_factor]
-    --days          回测天数 [默认: 730 (2年)]
-    --interval      K线时间粒度 [默认: 1h]
-    --capital       初始资金 [默认: 10000]
-    --compare       对比所有策略
-    --no-viz        不显示可视化图表
+    --coin          Coin symbol (btc, eth, sol, all) [default: btc]
+    --strategy      Trading strategy [default: multi_factor]
+    --days          Number of days to backtest [default: 730 (2 years)]
+    --interval      K-line interval [default: 1h]
+    --capital       Initial capital [default: 10000]
+    --compare       Compare all strategies
+    --no-viz        Skip visualization charts
 """
 
 import argparse
@@ -46,10 +45,10 @@ from backtest import BacktestEngine, BacktestResult
 from visualization import Visualizer
 from visualization.html_report import HTMLReportGenerator
 
-# 确保日志目录存在
+# Ensure log directory exists
 Path("logs").mkdir(parents=True, exist_ok=True)
 
-# 配置日志
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -62,25 +61,25 @@ logger = logging.getLogger(__name__)
 
 
 def parse_arguments() -> argparse.Namespace:
-    """解析命令行参数"""
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser(
         description="Crypto Trading Strategy Backtest",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # 回测BTC使用多因子策略（默认）
+    # Backtest BTC with multi-factor strategy (default)
     python run_backtest.py
-    
-    # 回测ETH使用均线策略
+
+    # Backtest ETH with MA cross strategy
     python run_backtest.py --coin eth --strategy ma_cross
-    
-    # 回测所有币种
+
+    # Backtest all coins
     python run_backtest.py --coin all
-    
-    # 对比多个策略
+
+    # Compare all strategies
     python run_backtest.py --coin btc --compare
-    
-    # 使用1小时数据回测2年
+
+    # Backtest 2 years with 1h interval
     python run_backtest.py --interval 1h --days 730
         """,
     )
@@ -89,7 +88,7 @@ Examples:
         "--coin",
         type=str,
         default="btc",
-        help="币种 (btc, eth, sol, all) - 默认: btc",
+        help="Coin symbol (btc, eth, sol, all) - default: btc",
     )
 
     parser.add_argument(
@@ -111,14 +110,14 @@ Examples:
             "grid",
             "martingale",
         ],
-        help="交易策略 - 默认: multi_factor",
+        help="Trading strategy - default: multi_factor",
     )
 
     parser.add_argument(
         "--days",
         type=int,
         default=730,
-        help="回测天数 - 默认: 730 (2年)",
+        help="Number of days to backtest - default: 730 (2 years)",
     )
 
     parser.add_argument(
@@ -126,26 +125,26 @@ Examples:
         type=str,
         default="1h",
         choices=["1m", "5m", "15m", "1h", "4h", "1d"],
-        help="K线时间粒度 - 默认: 1h",
+        help="K-line interval - default: 1h",
     )
 
     parser.add_argument(
         "--capital",
         type=float,
         default=10000.0,
-        help="初始资金 - 默认: $10,000",
+        help="Initial capital - default: $10,000",
     )
 
     parser.add_argument(
         "--compare",
         action="store_true",
-        help="对比所有策略性能",
+        help="Compare all strategy performance",
     )
 
     parser.add_argument(
         "--no-viz",
         action="store_true",
-        help="不显示可视化图表",
+        help="Skip visualization charts",
     )
 
     return parser.parse_args()
@@ -161,87 +160,86 @@ def run_single_backtest(
     generate_html: bool = True,
 ) -> Tuple[Optional[BacktestResult], Optional[pd.DataFrame]]:
     """
-    运行单次回测
+    Run a single backtest
 
     Args:
-        coin: 币种代码
-        strategy_name: 策略名称
-        days: 回测天数
-        interval: 时间粒度
-        capital: 初始资金
-        fetcher: 数据获取器
-        generate_html: 是否生成 HTML 报告
+        coin: Coin symbol
+        strategy_name: Strategy name
+        days: Number of days
+        interval: K-line interval
+        capital: Initial capital
+        fetcher: Data fetcher instance
+        generate_html: Whether to generate HTML report
 
     Returns:
-        (BacktestResult, DataFrame) 元组，如果失败则返回 (None, None)
+        (BacktestResult, DataFrame) tuple, or (None, None) on failure
     """
     logger.info(f"\n{'=' * 60}")
-    logger.info(f"🚀 开始回测 | 币种: {coin.upper()} | 策略: {strategy_name}")
+    logger.info(f"Starting backtest | Coin: {coin.upper()} | Strategy: {strategy_name}")
     logger.info(f"{'=' * 60}")
 
-    # 1. 获取历史数据
+    # 1. Fetch historical data
     data_file = f"data/historical/{coin}_{interval}_{days}d.csv"
 
     try:
         df = pd.read_csv(data_file, index_col="timestamp", parse_dates=True)
-        logger.info(f"📊 从文件加载数据: {len(df)} 条")
+        logger.info(f"Loaded data from file: {len(df)} records")
     except FileNotFoundError:
-        logger.info("📥 下载历史数据...")
+        logger.info("Downloading historical data...")
         df = fetcher.fetch_historical_data(coin, interval, days, data_file)
 
     if df.empty:
-        logger.error(f"❌ 无法获取 {coin} 数据")
+        logger.error(f"Failed to fetch {coin} data")
         return None, None
 
-    # 1.1 验证数据完整性
+    # 1.1 Validate data completeness
     interval_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
     minutes = interval_minutes.get(interval, 60)
     expected_records = int((days * 24 * 60) / minutes)
     actual_records = len(df)
     data_ratio = actual_records / expected_records
 
-    logger.info(f"📊 数据完整性: {actual_records}/{expected_records} ({data_ratio*100:.1f}%)")
+    logger.info(f"Data completeness: {actual_records}/{expected_records} ({data_ratio*100:.1f}%)")
 
     if data_ratio < 0.5:
-        logger.error(f"❌ 数据严重不完整 (仅 {data_ratio*100:.1f}%)，停止回测")
-        logger.error(f"   建议: 检查网络连接或稍后重试")
+        logger.error(f"Data severely incomplete (only {data_ratio*100:.1f}%), stopping backtest")
+        logger.error("   Suggestion: check network connection or try again later")
         return None, None
     elif data_ratio < 0.8:
-        logger.warning(f"⚠️  数据不完整 ({data_ratio*100:.1f}%)，回测结果可能不准确")
-        logger.warning(f"   建议: 重新运行以获取完整数据")
+        logger.warning(f"Data incomplete ({data_ratio*100:.1f}%), backtest results may be inaccurate")
+        logger.warning("   Suggestion: re-run to fetch complete data")
 
-    # 2. 创建策略
+    # 2. Create strategy
     if strategy_name == "grid":
-        # 网格策略参数：从数据中自动计算网格范围
+        # Grid strategy: auto-calculate grid range from data
         lower_price = df['low'].min()
         upper_price = df['high'].max()
         strategy = get_strategy(strategy_name, lower_price=lower_price, upper_price=upper_price)
     elif strategy_name == "martingale":
-        # 马丁格尔策略参数
         strategy = get_strategy(strategy_name, base_amount=0.001, multiplier=2.0, max_steps=5)
     else:
         strategy = get_strategy(strategy_name)
 
-    # 3. 运行回测
+    # 3. Run backtest
     engine = BacktestEngine(initial_capital=capital)
     result = engine.run_backtest(df, strategy, coin=coin.upper())
 
-    # 4. 保存日志
+    # 4. Save logs
     timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
     log_file = f"logs/backtest_{coin}_{strategy_name}_{days}d_{interval}_{timestamp}.json"
     result.save_logs(log_file)
 
-    # 5. 打印结果
-    logger.info(f"\n📈 回测结果:")
-    logger.info(f"   策略: {strategy_name}")
-    logger.info(f"   总收益率: {result.metrics.get('total_return_pct', 0):.2f}%")
-    logger.info(f"   年化收益: {result.metrics.get('annual_return_pct', 0):.2f}%")
-    logger.info(f"   夏普比率: {result.metrics.get('sharpe_ratio', 0):.2f}")
-    logger.info(f"   最大回撤: {result.metrics.get('max_drawdown_pct', 0):.2f}%")
-    logger.info(f"   胜率: {result.metrics.get('win_rate_pct', 0):.2f}%")
-    logger.info(f"   交易次数: {result.metrics.get('total_trades', 0)}")
+    # 5. Print results
+    logger.info(f"\nBacktest results:")
+    logger.info(f"   Strategy: {strategy_name}")
+    logger.info(f"   Total return: {result.metrics.get('total_return_pct', 0):.2f}%")
+    logger.info(f"   Annual return: {result.metrics.get('annual_return_pct', 0):.2f}%")
+    logger.info(f"   Sharpe ratio: {result.metrics.get('sharpe_ratio', 0):.2f}")
+    logger.info(f"   Max drawdown: {result.metrics.get('max_drawdown_pct', 0):.2f}%")
+    logger.info(f"   Win rate: {result.metrics.get('win_rate_pct', 0):.2f}%")
+    logger.info(f"   Total trades: {result.metrics.get('total_trades', 0)}")
 
-    # 6. 生成 HTML 报告
+    # 6. Generate HTML report
     if generate_html:
         try:
             html_generator = HTMLReportGenerator()
@@ -257,7 +255,7 @@ def run_single_backtest(
                 output_path=html_file,
             )
         except Exception as e:
-            logger.warning(f"⚠️  HTML 报告生成失败: {e}")
+            logger.warning(f"HTML report generation failed: {e}")
 
     return result, df
 
@@ -270,19 +268,19 @@ def compare_strategies(
     save_report: bool = True
 ) -> Dict[str, BacktestResult]:
     """
-    对比多个策略的性能
+    Compare performance of multiple strategies
 
-    运行所有策略的回测并生成对比报告。
+    Runs backtests for all strategies and generates a comparison report.
 
     Args:
-        coin: 币种代码
-        days: 回测天数
-        interval: 时间粒度
-        capital: 初始资金
-        save_report: 是否保存可视化报告
+        coin: Coin symbol
+        days: Number of days
+        interval: K-line interval
+        capital: Initial capital
+        save_report: Whether to save visualization report
 
     Returns:
-        策略名称到 BacktestResult 的字典
+        Dict mapping strategy name to BacktestResult
     """
     strategies = [
         "ma_cross",
@@ -303,13 +301,13 @@ def compare_strategies(
     results: Dict[str, BacktestResult] = {}
     data_frames: Dict[str, pd.DataFrame] = {}
 
-    fetcher = HistoricalDataFetcher(verify_ssl=False)
+    fetcher = HistoricalDataFetcher()
 
     logger.info(f"\n{'=' * 60}")
-    logger.info(f"📊 策略对比 | 币种: {coin.upper()} | 天数: {days}d | 周期: {interval}")
+    logger.info(f"Strategy comparison | Coin: {coin.upper()} | Days: {days}d | Interval: {interval}")
     logger.info(f"{'=' * 60}")
 
-    # 运行每个策略的回测
+    # Run backtest for each strategy
     for strategy_name in strategies:
         result, df = run_single_backtest(
             coin, strategy_name, days, interval, capital, fetcher
@@ -320,24 +318,24 @@ def compare_strategies(
             data_frames[strategy_name] = df
 
     if not results:
-        logger.error("❌ 没有成功运行的策略")
+        logger.error("No successful strategy runs")
         return {}
 
-    # 打印对比表格
+    # Print comparison table
     print_comparison_table(results)
 
-    # 生成可视化报告
+    # Generate visualization report
     if save_report and results:
         viz = Visualizer()
         chart_paths = viz.create_comparison_report(results, coin, "results", days, interval)
 
-        # 生成 HTML 对比报告
+        # Generate HTML comparison report
         try:
             html_generator = HTMLReportGenerator()
             timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
             html_file = f"results/comparison_{coin}_{days}d_{interval}_{timestamp}.html"
 
-            # 将图表路径映射为 HTML 需要的格式
+            # Map chart paths to format needed by HTML generator
             charts_base64 = {}
             if chart_paths:
                 for path in chart_paths:
@@ -358,23 +356,23 @@ def compare_strategies(
                 chart_paths=charts_base64 if chart_paths else None,
             )
         except Exception as e:
-            logger.warning(f"⚠️  HTML 对比报告生成失败: {e}")
+            logger.warning(f"HTML comparison report generation failed: {e}")
 
     return results
 
 
 def print_comparison_table(results: Dict[str, BacktestResult]) -> None:
     """
-    打印策略对比表格
-    
+    Print strategy comparison table
+
     Args:
-        results: 策略结果字典
+        results: Strategy results dictionary
     """
     logger.info(f"\n{'=' * 60}")
-    logger.info("📊 策略对比结果")
+    logger.info("Strategy comparison results")
     logger.info(f"{'=' * 60}")
 
-    # 表头
+    # Table header
     header = (
         f"{'Strategy':<15} {'Return%':<12} {'CAGR%':<12} "
         f"{'Sharpe':<10} {'MaxDD%':<10} {'Win%':<10} {'Trades':<10}"
@@ -382,7 +380,7 @@ def print_comparison_table(results: Dict[str, BacktestResult]) -> None:
     print(f"\n{header}")
     print("-" * 85)
 
-    # 按夏普比率排序
+    # Sort by Sharpe ratio
     sorted_results = sorted(
         results.items(),
         key=lambda x: x[1].metrics.get("sharpe_ratio", 0),
@@ -401,31 +399,31 @@ def print_comparison_table(results: Dict[str, BacktestResult]) -> None:
             f"{m.get('total_trades', 0):>8}"
         )
 
-    # 高亮最佳策略
+    # Highlight best strategy
     if sorted_results:
         best_strategy, best_result = sorted_results[0]
-        logger.info(f"\n🏆 最佳策略: {best_strategy}")
-        logger.info(f"   夏普比率: {best_result.metrics.get('sharpe_ratio', 0):.2f}")
-        logger.info(f"   总收益率: {best_result.metrics.get('total_return_pct', 0):.2f}%")
+        logger.info(f"\nBest strategy: {best_strategy}")
+        logger.info(f"   Sharpe ratio: {best_result.metrics.get('sharpe_ratio', 0):.2f}")
+        logger.info(f"   Total return: {best_result.metrics.get('total_return_pct', 0):.2f}%")
 
 
 def main() -> None:
-    """主函数"""
+    """Main entry point"""
     args = parse_arguments()
 
-    # 确保目录存在
+    # Ensure directories exist
     Path("data/historical").mkdir(parents=True, exist_ok=True)
     Path("logs").mkdir(parents=True, exist_ok=True)
     Path("results").mkdir(parents=True, exist_ok=True)
 
     if args.compare:
-        # 策略对比模式
+        # Strategy comparison mode
         compare_strategies(args.coin, args.days, args.interval, args.capital)
-        
+
     elif args.coin == "all":
-        # 回测所有币种
+        # Backtest all coins
         coins = ["btc", "eth", "sol"]
-        fetcher = HistoricalDataFetcher(verify_ssl=False)
+        fetcher = HistoricalDataFetcher()
 
         for coin in coins:
             result, df = run_single_backtest(
@@ -443,8 +441,8 @@ def main() -> None:
                     result, df, args.strategy, coin, "results", args.days, args.interval
                 )
     else:
-        # 单次回测模式
-        fetcher = HistoricalDataFetcher(verify_ssl=False)
+        # Single backtest mode
+        fetcher = HistoricalDataFetcher()
         result, df = run_single_backtest(
             args.coin,
             args.strategy,
@@ -460,9 +458,9 @@ def main() -> None:
                 result, df, args.strategy, args.coin, "results", args.days, args.interval
             )
 
-    logger.info("\n✅ 回测完成！")
-    logger.info(f"📁 结果保存在: results/")
-    logger.info(f"📝 日志保存在: logs/")
+    logger.info("\nBacktest complete!")
+    logger.info("Results saved in: results/")
+    logger.info("Logs saved in: logs/")
 
 
 if __name__ == "__main__":

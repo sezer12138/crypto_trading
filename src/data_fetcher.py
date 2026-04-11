@@ -12,6 +12,8 @@ from typing import Dict, List, Optional
 import yaml
 from pathlib import Path
 
+from utils import get_proxy, get_binance_base_url, get_coingecko_base_url
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -28,9 +30,13 @@ class CryptoDataFetcher:
         self.coins = self.config.get("coins", ["btc", "eth", "sol"])
         self.currency = self.config.get("display", {}).get("currency", "USD")
 
-        # API endpoints
-        self.coingecko_base = "https://api.coingecko.com/api/v3"
-        self.binance_base = "https://api.binance.com/api/v3"
+        # API endpoints (configurable via environment variables)
+        self.coingecko_base = get_coingecko_base_url()
+        self.binance_base = get_binance_base_url()
+        self.proxies = get_proxy()
+
+        if self.proxies:
+            logger.info(f"Using proxy: {list(self.proxies.values())[0]}")
 
         # Coin mappings
         self.coin_ids = {"btc": "bitcoin", "eth": "ethereum", "sol": "solana"}
@@ -77,7 +83,7 @@ class CryptoDataFetcher:
 
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, params=params, timeout=10, verify=self.verify_ssl)
+                response = requests.get(url, params=params, timeout=10, verify=self.verify_ssl, proxies=self.proxies)
 
                 # Handle rate limiting
                 if response.status_code == 429:

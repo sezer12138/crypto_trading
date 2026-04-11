@@ -12,6 +12,8 @@ import logging
 from typing import Dict, List, Optional
 import json
 
+from utils import get_proxy, get_binance_base_url, get_coingecko_base_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,8 +21,12 @@ class HistoricalDataFetcher:
     """Fetches cryptocurrency historical K-line data"""
 
     def __init__(self, max_retries: int = 3, retry_delay: float = 2.0, verify_ssl: bool = True):
-        self.binance_base = "https://api.binance.com/api/v3"
-        self.coingecko_base = "https://api.coingecko.com/api/v3"
+        self.binance_base = get_binance_base_url()
+        self.coingecko_base = get_coingecko_base_url()
+        self.proxies = get_proxy()
+
+        if self.proxies:
+            logger.info(f"Using proxy: {list(self.proxies.values())[0]}")
 
         # Symbol mappings
         self.symbols = {"btc": "BTCUSDT", "eth": "ETHUSDT", "sol": "SOLUSDT"}
@@ -80,7 +86,7 @@ class HistoricalDataFetcher:
         # Retry mechanism
         for attempt in range(self.max_retries):
             try:
-                response = requests.get(url, params=params, timeout=30, verify=self.verify_ssl)
+                response = requests.get(url, params=params, timeout=30, verify=self.verify_ssl, proxies=self.proxies)
                 response.raise_for_status()
                 data = response.json()
 

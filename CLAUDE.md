@@ -65,3 +65,28 @@ Four-layer pipeline: **Data → Strategy → Backtest → Visualization**
 - Strategy signals use numeric codes: 1 (buy), -1 (sell), 0 (hold).
 - Config at `config/settings.yaml` for data sources, logging, storage paths.
 - Backtest logs saved as JSON in `logs/`, chart outputs in `results/`.
+
+## Network Configuration (for restricted regions)
+
+Binance API may be geo-blocked (HTTP 451) in some regions (e.g. China). Use these environment variables to configure proxy and alternative endpoints:
+
+```bash
+# Set HTTP proxy (supports HTTP/HTTPS/SOCKS5)
+export CRYPTO_PROXY=http://127.0.0.1:7890
+
+# Or use standard proxy env vars (also supported)
+export HTTPS_PROXY=http://127.0.0.1:7890
+
+# Override Binance API base URL (if using a mirror)
+export CRYPTO_BINANCE_BASE=https://api1.binance.com/api/v3
+
+# Override WebSocket base URL
+export CRYPTO_WS_BASE=wss://stream.binance.com:443
+
+# Disable SSL verification (not recommended for production)
+export CRYPTO_DISABLE_SSL=1
+
+# Run with proxy configured
+export CRYPTO_PROXY=http://127.0.0.1:7890
+python run_backtest.py --coin btc --strategy ma_cross --no-viz
+```

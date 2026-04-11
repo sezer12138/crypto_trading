@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Callable, Dict
 import logging
 
+from utils import get_proxy, get_ws_base_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,17 +35,19 @@ class BinanceWebSocketClient:
         self.reconnect_interval = 5
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 10
+        self.ws_base = get_ws_base_url()
+        self.proxies = get_proxy()
+
+        if self.proxies:
+            logger.info(f"WebSocket using proxy: {list(self.proxies.values())[0]}")
 
         # Symbol mappings
         self.symbols = {"btc": "btcusdt", "eth": "ethusdt", "sol": "solusdt"}
 
-    def _get_stream_url(self, use_port_443: bool = True) -> str:
+    def _get_stream_url(self) -> str:
         """Generate WebSocket stream URL."""
         streams = "/".join([f"{self.symbols[coin.lower()]}@ticker" for coin in self.coins])
-        # Use port 443 to avoid firewall issues
-        if use_port_443:
-            return f"wss://stream.binance.com:443/ws/{streams}"
-        return f"wss://stream.binance.com:9443/ws/{streams}"
+        return f"{self.ws_base}/ws/{streams}"
 
     def _on_message(self, ws, message):
         """Handle incoming WebSocket messages."""
@@ -143,16 +147,26 @@ class BinanceWebSocketClient:
                 logger.warning("WebSocket SSL verification disabled (CRYPTO_DISABLE_SSL=1)")
 
             self.ws = websocket.WebSocketApp(
-                self._get_stream_url(use_port_443=True),
+                self._get_stream_url(),
                 on_open=self._on_open,
                 on_message=self._on_message,
                 on_error=self._on_error,
                 on_close=self._on_close,
             )
 
-            # Run in separate thread with SSL context
+            # Build kwargs for run_forever
+            ws_kwargs = {"sslopt": {"context": ssl_context}}
+
+            # Add HTTP proxy support for WebSocket if configured
+            http_proxy = os.environ.get("CRYPTO_PROXY") or os.environ.get("HTTP_PROXY")
+            if http_proxy:
+                ws_kwargs["http_proxy_host"] = http_proxy.split("//")[-1].split(":")[0]
+                ws_kwargs["http_proxy_port"] = int(http_proxy.split(":")[-1].rstrip("/"))
+                logger.info(f"WebSocket connecting via proxy: {ws_kwargs['http_proxy_host']}:{ws_kwargs['http_proxy_port']}")
+
+            # Run in separate thread
             self.ws_thread = threading.Thread(
-                target=self.ws.run_forever, kwargs={"sslopt": {"context": ssl_context}}
+                target=self.ws.run_forever, kwargs=ws_kwargs
             )
             self.ws_thread.daemon = True
             self.ws_thread.start()

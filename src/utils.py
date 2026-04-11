@@ -174,6 +174,51 @@ def generate_alert(coin: str, current_price: float, reference_price: float, thre
     return None
 
 
+def get_proxy() -> Dict[str, str]:
+    """Get proxy configuration from environment variables.
+
+    Checks CRYPTO_PROXY first, then falls back to HTTPS_PROXY / HTTP_PROXY.
+
+    Returns:
+        Dict suitable for requests.get(proxies=...), e.g. {"https": "http://127.0.0.1:7890"}
+        Returns empty dict if no proxy is configured.
+    """
+    proxy_url = os.environ.get("CRYPTO_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if proxy_url:
+        return {"http": proxy_url, "https": proxy_url}
+    return {}
+
+
+def get_binance_base_url() -> str:
+    """Get Binance API base URL from environment variable or default.
+
+    Users behind geo-blocks (e.g. China) can set CRYPTO_BINANCE_BASE
+    to an accessible mirror or alternative endpoint.
+
+    Returns:
+        Binance API base URL string.
+    """
+    return os.environ.get("CRYPTO_BINANCE_BASE", "https://api.binance.com/api/v3")
+
+
+def get_coingecko_base_url() -> str:
+    """Get CoinGecko API base URL from environment variable or default.
+
+    Returns:
+        CoinGecko API base URL string.
+    """
+    return os.environ.get("CRYPTO_COINGECKO_BASE", "https://api.coingecko.com/api/v3")
+
+
+def get_ws_base_url() -> str:
+    """Get Binance WebSocket base URL from environment variable or default.
+
+    Returns:
+        WebSocket base URL string (e.g. wss://stream.binance.com:443).
+    """
+    return os.environ.get("CRYPTO_WS_BASE", "wss://stream.binance.com:443")
+
+
 def load_config(config_path: str = None) -> Dict:
     """Load configuration file."""
     try:
