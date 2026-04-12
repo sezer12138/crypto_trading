@@ -80,3 +80,6 @@ optimization_tasks.json
 tmp/
 temp/
 *.tmp
+
+# Docs
+docs/
