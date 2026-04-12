@@ -20,7 +20,13 @@ Import strategy classes directly:
 """
 
 from strategies._base import TradingStrategy
-from strategies._helpers import forward_fill_position, detect_crossover, calculate_rsi
+from strategies._helpers import (
+    forward_fill_position,
+    detect_crossover,
+    calculate_rsi,
+    convert_to_event_signals,
+    add_trend_filter,
+)
 
 from strategies.ma_cross import MovingAverageCrossStrategy
 from strategies.rsi import RSIStrategy

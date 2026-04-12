@@ -57,13 +57,13 @@ class BreakoutStrategy(TradingStrategy):
         if self.confirmation:
             # Close price confirmation required for breakout
             df.loc[
-                (df["close"] > df["high_n"].shift(1)) &
-                (df["close"].shift(1) <= df["high_n"].shift(2)),
+                (df["close"] > df["high_n"].shift(1))
+                & (df["close"].shift(1) <= df["high_n"].shift(2)),
                 "signal",
             ] = 1
             df.loc[
-                (df["close"] < df["low_n"].shift(1)) &
-                (df["close"].shift(1) >= df["low_n"].shift(2)),
+                (df["close"] < df["low_n"].shift(1))
+                & (df["close"].shift(1) >= df["low_n"].shift(2)),
                 "signal",
             ] = -1
         else:

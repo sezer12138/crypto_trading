@@ -83,8 +83,9 @@ class VWAPStrategy(TradingStrategy):
 
         # Calculate VWAP
         typical_price = (df["high"] + df["low"] + df["close"]) / 3
-        df["vwap"] = (typical_price * df["volume"]).rolling(window=self.window).sum() / \
-                     df["volume"].rolling(window=self.window).sum()
+        df["vwap"] = (typical_price * df["volume"]).rolling(window=self.window).sum() / df[
+            "volume"
+        ].rolling(window=self.window).sum()
         df["vwap_dev"] = (df["close"] - df["vwap"]) / df["vwap"].replace(0, float("nan"))
 
         if self.dynamic_deviation:
