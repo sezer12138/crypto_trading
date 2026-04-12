@@ -254,8 +254,12 @@ class ComparisonMixin:
         """
         Plot trade details for all strategies in a subplot grid
 
-        Each subplot shows buy/sell trade values over time for one strategy.
-        Green bars = buy (positive value), red bars = sell (negative value).
+        Each subplot is a scatter plot showing buy/sell trades:
+        - X-axis: trade time
+        - Y-axis: trade price
+        - Green triangle-up markers = buy, Red triangle-down markers = sell
+        - Marker size proportional to trade value
+        - Alpha adapts to trade count for readability
 
         Args:
             results: Dict[str, BacktestResult] - strategy results
@@ -272,10 +276,13 @@ class ComparisonMixin:
             ax.text(0.5, 0.5, "No strategies to display", ha="center", va="center")
             return fig
 
-        ncols = int(np.ceil(np.sqrt(n)))
+        ncols = 3
         nrows = int(np.ceil(n / ncols))
 
-        fig, axes = plt.subplots(nrows, ncols, figsize=DEFAULT_TRADE_DETAILS_FIGSIZE)
+        # Dynamic figure size: wider subplots, taller for more rows
+        fig_w = 18
+        fig_h = max(20, nrows * 5)
+        fig, axes = plt.subplots(nrows, ncols, figsize=(fig_w, fig_h))
         axes = np.array(axes).flatten() if n > 1 else np.array([axes])
 
         for idx, name in enumerate(strategies):
@@ -289,61 +296,78 @@ class ComparisonMixin:
                     ha="center", va="center", transform=ax.transAxes,
                     fontsize=12, color="#888",
                 )
-                ax.set_title(f"{name} (0 trades)", fontsize=10, fontweight="bold")
+                ax.set_title(f"{name} (0 trades)", fontsize=11, fontweight="bold")
                 ax.set_xticks([])
                 ax.set_yticks([])
                 continue
 
-            buy_times, buy_vals = [], []
-            sell_times, sell_vals = [], []
+            buy_times, buy_prices, buy_vals = [], [], []
+            sell_times, sell_prices, sell_vals = [], [], []
 
             for t in trades:
                 if t.action == "buy":
                     buy_times.append(t.timestamp)
+                    buy_prices.append(t.price)
                     buy_vals.append(t.value)
                 elif t.action == "sell":
                     sell_times.append(t.timestamp)
-                    sell_vals.append(-t.value)
+                    sell_prices.append(t.price)
+                    sell_vals.append(t.value)
 
-            max_val = max(
-                max(buy_vals, default=0),
-                max(abs(v) for v in sell_vals) if sell_vals else 0,
-                1,
-            )
-            bar_width = max_val * 0.02
+            n_trades = len(buy_times) + len(sell_times)
 
+            # Adaptive alpha: more trades -> lower alpha for readability
+            alpha = max(0.05, 0.8 - (n_trades / 3000))
+
+            # Normalize marker sizes proportional to trade value
+            all_vals = buy_vals + sell_vals
+            max_val = max(all_vals) if all_vals else 1
+            min_size, max_size = 15, 150
+
+            def scale_sizes(vals):
+                if not vals or max_val == 0:
+                    return [min_size] * len(vals)
+                return [min_size + (v / max_val) * (max_size - min_size) for v in vals]
+
+            buy_sizes = scale_sizes(buy_vals)
+            sell_sizes = scale_sizes(sell_vals)
+
+            # Plot buy markers (green triangle-up)
             if buy_times:
-                ax.bar(
-                    buy_times, buy_vals,
-                    width=bar_width, color="#00ff88", alpha=0.8,
-                    label=f"Buy ({len(buy_times)})",
+                ax.scatter(
+                    buy_times, buy_prices,
+                    s=buy_sizes, c="#00cc66", marker="^",
+                    alpha=alpha, edgecolors="#006633", linewidths=0.5,
+                    label=f"Buy ({len(buy_times)})", zorder=3,
                 )
+            # Plot sell markers (red triangle-down)
             if sell_times:
-                ax.bar(
-                    sell_times, sell_vals,
-                    width=bar_width, color="#ff4757", alpha=0.8,
-                    label=f"Sell ({len(sell_times)})",
+                ax.scatter(
+                    sell_times, sell_prices,
+                    s=sell_sizes, c="#ff4444", marker="v",
+                    alpha=alpha, edgecolors="#990000", linewidths=0.5,
+                    label=f"Sell ({len(sell_times)})", zorder=3,
                 )
 
-            ax.axhline(y=0, color='black', linewidth=0.5, alpha=0.5)
             ax.set_title(
-                f"{name} ({len(buy_times)}B / {len(sell_times)}S)",
-                fontsize=10, fontweight="bold",
+                f"{name} ({len(buy_times)} buys / {len(sell_times)} sells)",
+                fontsize=11, fontweight="bold",
             )
-            ax.set_ylabel("Value ($)", fontsize=8)
-            ax.tick_params(axis='both', labelsize=7)
+            ax.set_ylabel("Price ($)", fontsize=9)
+            ax.tick_params(axis='both', labelsize=8)
             ax.grid(True, alpha=0.2)
-            ax.legend(loc="upper right", fontsize=7)
+            ax.legend(loc="upper left", fontsize=8, framealpha=0.7)
 
         # Hide unused subplots
         for idx in range(n, len(axes)):
             axes[idx].set_visible(False)
 
         fig.suptitle(
-            "Trade Details by Strategy (Buy/Sell Amounts)",
+            "Trade Details by Strategy (marker size = trade value)",
             fontsize=16, fontweight="bold", y=1.01,
         )
         plt.tight_layout()
+        fig.autofmt_xdate()
         self._save_figure(fig, save_path)
 
         if show_plot:
