@@ -66,8 +66,9 @@ class ComparisonMixin:
             ax = axes[idx]
             values = [results[s].metrics.get(metric, 0) for s in strategies]
 
-            # Get color mapping based on value sorting
-            sorted_indices = np.argsort(values)[::-1] if metric != "max_drawdown_pct" else np.argsort(values)
+            # For all metrics, sort descending so index [0] = best value
+            # (max_drawdown_pct is negative; closest to 0 = highest = best)
+            sorted_indices = np.argsort(values)[::-1]
             colors = [
                 "#27ae60" if i == sorted_indices[0]
                 else "#3498db" if i == sorted_indices[1]

@@ -73,6 +73,9 @@ results/
 # Claude Code
 .claude/
 
+# Optimization task files
+optimization_tasks.json
+
 # Temporary files
 tmp/
 temp/

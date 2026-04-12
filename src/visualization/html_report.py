@@ -838,8 +838,8 @@ class HTMLReportGenerator:
         best_sharpe_name = best_name
         best_sharpe = best_m.get('sharpe_ratio', 0)
 
-        # Find strategy with smallest drawdown
-        min_dd_name, min_dd_result = min(sorted_results, key=lambda x: x[1].metrics.get('max_drawdown_pct', 0))
+        # Find strategy with smallest drawdown (max_drawdown_pct is negative, closest to 0 is best)
+        min_dd_name, min_dd_result = max(sorted_results, key=lambda x: x[1].metrics.get('max_drawdown_pct', 0))
         min_dd = min_dd_result.metrics.get('max_drawdown_pct', 0)
 
         conclusion = f"""
