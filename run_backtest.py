@@ -217,11 +217,24 @@ def run_single_backtest(
         logger.warning(f"Data incomplete ({data_ratio*100:.1f}%), backtest results may be inaccurate")
         logger.warning("   Suggestion: re-run to fetch complete data")
 
+    # 1.2 Warn about sub-hourly intervals
+    if interval_minutes.get(interval, 60) < 60:
+        logger.warning(
+            f"Warning: Sub-hourly interval '{interval}' may produce excessive trades "
+            f"and high transaction costs. Consider using 1h or longer intervals for "
+            f"more reliable results."
+        )
+
     # 2. Create strategy
     if strategy_name == "grid":
-        # Grid strategy: auto-calculate grid range from data
-        lower_price = df['low'].min()
-        upper_price = df['high'].max()
+        # Grid strategy: calculate grid range from first N bars to avoid look-ahead bias
+        lookback_bars = min(100, len(df))
+        lower_price = df['low'].iloc[:lookback_bars].min()
+        upper_price = df['high'].iloc[:lookback_bars].max()
+        # Add margin to accommodate price movement beyond the initial range
+        margin = (upper_price - lower_price) * 0.1
+        lower_price -= margin
+        upper_price += margin
         strategy = get_strategy(strategy_name, lower_price=lower_price, upper_price=upper_price)
     elif strategy_name == "martingale":
         strategy = get_strategy(strategy_name, base_amount=0.001, multiplier=2.0, max_steps=5)
@@ -316,6 +329,13 @@ def compare_strategies(
     logger.info(f"\n{'=' * 60}")
     logger.info(f"Strategy comparison | Coin: {coin.upper()} | Days: {days}d | Interval: {interval}")
     logger.info(f"{'=' * 60}")
+
+    interval_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+    if interval_minutes.get(interval, 60) < 60:
+        logger.warning(
+            f"Warning: Using sub-hourly interval '{interval}'. This may produce excessive "
+            f"trades and high transaction costs. Consider using 1h or longer intervals."
+        )
 
     # Run backtest for each strategy
     for strategy_name in strategies:
