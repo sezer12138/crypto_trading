@@ -18,14 +18,22 @@ Usage example:
 
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import calculate_rsi
+from strategies._helpers import calculate_rsi, convert_to_event_signals, forward_fill_position
 from strategies.constants import (
-    DEFAULT_MA_SHORT, DEFAULT_MA_LONG,
-    DEFAULT_RSI_PERIOD, DEFAULT_VOLUME_THRESHOLD,
-    WEIGHT_MA_TREND, WEIGHT_RSI, WEIGHT_VOLUME, WEIGHT_VOLATILITY,
-    SCORE_BUY_THRESHOLD, SCORE_SELL_THRESHOLD,
-    VOLUME_LOW_RATIO, VOLATILITY_QUANTILE,
-    DEFAULT_VOLUME_MA_WINDOW, DEFAULT_VOLATILITY_WINDOW,
+    DEFAULT_MA_SHORT,
+    DEFAULT_MA_LONG,
+    DEFAULT_RSI_PERIOD,
+    DEFAULT_VOLUME_THRESHOLD,
+    WEIGHT_MA_TREND,
+    WEIGHT_RSI,
+    WEIGHT_VOLUME,
+    WEIGHT_VOLATILITY,
+    SCORE_BUY_THRESHOLD,
+    SCORE_SELL_THRESHOLD,
+    VOLUME_LOW_RATIO,
+    VOLATILITY_QUANTILE,
+    DEFAULT_VOLUME_MA_WINDOW,
+    DEFAULT_VOLATILITY_WINDOW,
 )
 
 
@@ -139,8 +147,9 @@ class MultiFactorStrategy(TradingStrategy):
         Buy signal when composite score > buy threshold (0.5),
         sell signal when composite score < sell threshold (-0.5).
 
-        Unlike simple strategies, this strategy uses vectorized forward fill for position management,
-        as the scoring system may fluctuate frequently around the threshold.
+        Uses event-based signal conversion to prevent over-trading: only the first bar
+        of each signal state change emits a signal, consecutive bars with the same
+        state are suppressed.
 
         Args:
             df: DataFrame containing OHLCV data
@@ -151,15 +160,15 @@ class MultiFactorStrategy(TradingStrategy):
         df = self.calculate_indicators(df)
         df = self._calculate_score(df)
 
-        # Generate signals
+        # Generate signals from score thresholds
         df["signal"] = 0
         df.loc[df["score"] > SCORE_BUY_THRESHOLD, "signal"] = 1
         df.loc[df["score"] < SCORE_SELL_THRESHOLD, "signal"] = -1
 
-        # Position state (using vectorized forward fill, equivalent to row-by-row management)
-        from strategies._helpers import forward_fill_position
+        # Convert state-based signals to event-based (keep only first bar of each state change)
+        df = convert_to_event_signals(df)
+
+        # Forward fill position state
         df = forward_fill_position(df)
-        # Map -1 position to 0 (no position), keeping position=1 after buy
-        df["position"] = df["position"].clip(lower=0)
 
         return df
