@@ -152,6 +152,15 @@ class ReportMixin:
         generated_files.append(f"{output_dir}/comparison_equity_{coin}_{days}d_{interval}_{timestamp}.png")
         plt.close(fig3)
 
+        # 4. Trade details comparison
+        fig4 = self.plot_trade_details_comparison(
+            results,
+            save_path=f"{output_dir}/comparison_trade_details_{coin}_{days}d_{interval}_{timestamp}.png",
+            show_plot=False,
+        )
+        generated_files.append(f"{output_dir}/comparison_trade_details_{coin}_{days}d_{interval}_{timestamp}.png")
+        plt.close(fig4)
+
         logger.info(f"✅ Comparison report generated: {output_dir}/")
 
         return generated_files

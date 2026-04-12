@@ -13,6 +13,7 @@ from visualization._constants import (
     DEFAULT_COMPARISON_FIGSIZE,
     DEFAULT_RANKING_FIGSIZE_BASE,
     DEFAULT_EQUITY_COMPARISON_FIGSIZE,
+    DEFAULT_TRADE_DETAILS_FIGSIZE,
     DEFAULT_TOP_N_COMPARISON,
     DEFAULT_TOP_N_EQUITY,
 )
@@ -235,6 +236,113 @@ class ComparisonMixin:
         ax.legend(loc='upper left', fontsize=10)
         ax.grid(True, alpha=0.3)
 
+        plt.tight_layout()
+        self._save_figure(fig, save_path)
+
+        if show_plot:
+            plt.show()
+            plt.close(fig)
+
+        return fig
+
+    def plot_trade_details_comparison(
+        self,
+        results: Dict[str, object],
+        save_path: Optional[str] = None,
+        show_plot: bool = True,
+    ) -> plt.Figure:
+        """
+        Plot trade details for all strategies in a subplot grid
+
+        Each subplot shows buy/sell trade values over time for one strategy.
+        Green bars = buy (positive value), red bars = sell (negative value).
+
+        Args:
+            results: Dict[str, BacktestResult] - strategy results
+            save_path: Save path (optional)
+            show_plot: Whether to display the chart (default True)
+
+        Returns:
+            matplotlib Figure object
+        """
+        strategies = sorted(results.keys())
+        n = len(strategies)
+        if n == 0:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.text(0.5, 0.5, "No strategies to display", ha="center", va="center")
+            return fig
+
+        ncols = int(np.ceil(np.sqrt(n)))
+        nrows = int(np.ceil(n / ncols))
+
+        fig, axes = plt.subplots(nrows, ncols, figsize=DEFAULT_TRADE_DETAILS_FIGSIZE)
+        axes = np.array(axes).flatten() if n > 1 else np.array([axes])
+
+        for idx, name in enumerate(strategies):
+            ax = axes[idx]
+            result = results[name]
+            trades = result.trades
+
+            if not trades:
+                ax.text(
+                    0.5, 0.5, "No trades",
+                    ha="center", va="center", transform=ax.transAxes,
+                    fontsize=12, color="#888",
+                )
+                ax.set_title(f"{name} (0 trades)", fontsize=10, fontweight="bold")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                continue
+
+            buy_times, buy_vals = [], []
+            sell_times, sell_vals = [], []
+
+            for t in trades:
+                if t.action == "buy":
+                    buy_times.append(t.timestamp)
+                    buy_vals.append(t.value)
+                elif t.action == "sell":
+                    sell_times.append(t.timestamp)
+                    sell_vals.append(-t.value)
+
+            max_val = max(
+                max(buy_vals, default=0),
+                max(abs(v) for v in sell_vals) if sell_vals else 0,
+                1,
+            )
+            bar_width = max_val * 0.02
+
+            if buy_times:
+                ax.bar(
+                    buy_times, buy_vals,
+                    width=bar_width, color="#00ff88", alpha=0.8,
+                    label=f"Buy ({len(buy_times)})",
+                )
+            if sell_times:
+                ax.bar(
+                    sell_times, sell_vals,
+                    width=bar_width, color="#ff4757", alpha=0.8,
+                    label=f"Sell ({len(sell_times)})",
+                )
+
+            ax.axhline(y=0, color='black', linewidth=0.5, alpha=0.5)
+            ax.set_title(
+                f"{name} ({len(buy_times)}B / {len(sell_times)}S)",
+                fontsize=10, fontweight="bold",
+            )
+            ax.set_ylabel("Value ($)", fontsize=8)
+            ax.tick_params(axis='both', labelsize=7)
+            ax.grid(True, alpha=0.2)
+            ax.legend(loc="upper right", fontsize=7)
+
+        # Hide unused subplots
+        for idx in range(n, len(axes)):
+            axes[idx].set_visible(False)
+
+        fig.suptitle(
+            "Trade Details by Strategy (Buy/Sell Amounts)",
+            fontsize=16, fontweight="bold", y=1.01,
+        )
         plt.tight_layout()
         self._save_figure(fig, save_path)
 

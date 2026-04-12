@@ -19,6 +19,7 @@ DEFAULT_MONTHLY_FIGSIZE = (12, 7)       # Monthly returns chart size
 DEFAULT_COMPARISON_FIGSIZE = (18, 10)   # Strategy comparison chart size
 DEFAULT_RANKING_FIGSIZE_BASE = (10, 6)  # Ranking chart base size
 DEFAULT_EQUITY_COMPARISON_FIGSIZE = (14, 8)  # Equity comparison chart size
+DEFAULT_TRADE_DETAILS_FIGSIZE = (20, 20)    # Trade details comparison chart size
 
 # ============================================================
 # Subplot Ratios

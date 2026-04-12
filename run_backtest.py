@@ -355,6 +355,8 @@ def compare_strategies(
                         charts_base64["ranking"] = path
                     elif "equity" in path:
                         charts_base64["equity"] = path
+                    elif "trade_details" in path:
+                        charts_base64["trade_details"] = path
 
             html_generator.generate_comparison_report(
                 results=results,

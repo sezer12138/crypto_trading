@@ -625,6 +625,7 @@ class HTMLReportGenerator:
             "metrics": "Core Metrics Comparison",
             "ranking": "Strategy Ranking",
             "equity": "Equity Curve Comparison (Top 5)",
+            "trade_details": "Trade Details by Strategy (Buy/Sell Amounts)",
         }
 
         for name, base64_data in charts_base64.items():
