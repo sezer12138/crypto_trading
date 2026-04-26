@@ -160,15 +160,11 @@ class MultiFactorStrategy(TradingStrategy):
         df = self.calculate_indicators(df)
         df = self._calculate_score(df)
 
-        # Generate signals from score thresholds
         df["signal"] = 0
         df.loc[df["score"] > SCORE_BUY_THRESHOLD, "signal"] = 1
         df.loc[df["score"] < SCORE_SELL_THRESHOLD, "signal"] = -1
 
-        # Convert state-based signals to event-based (keep only first bar of each state change)
         df = convert_to_event_signals(df)
-
-        # Forward fill position state
         df = forward_fill_position(df)
 
         return df

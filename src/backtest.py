@@ -49,7 +49,12 @@ Path("logs").mkdir(parents=True, exist_ok=True)
 SIGNAL_BUY = 1
 SIGNAL_SELL = -1
 SIGNAL_HOLD = 0
-RISK_FREE_RATE = 0.02  # Risk-free rate 2%
+FORCED_SELL_SIGNAL = -2  # Marks stop-loss / end-of-data forced liquidations
+ACTION_BUY = "buy"
+ACTION_SELL = "sell"
+ACTION_HOLD = "hold"
+SIGNAL_TO_ACTION = {SIGNAL_BUY: ACTION_BUY, SIGNAL_SELL: ACTION_SELL, SIGNAL_HOLD: ACTION_HOLD}
+RISK_FREE_RATE = 0.02
 DAYS_PER_YEAR = 365
 DAYS_PER_MONTH = 30
 
@@ -280,6 +285,8 @@ class BacktestEngine:
         max_trades_per_day: Maximum number of trades per day (default 6)
         stop_loss_pct: Per-trade stop-loss percentage (default 0.05 = 5%)
         max_drawdown_pct: Max drawdown circuit breaker percentage (default 0.20 = 20%)
+        log_decisions: When True, append a per-bar decision row to ``BacktestResult.decision_log``
+            (default False — skipped to avoid ~N dict allocations on long backtests).
 
     Attributes:
         initial_capital: Initial capital
@@ -306,13 +313,14 @@ class BacktestEngine:
     def __init__(
         self,
         initial_capital: float = 10000.0,
-        commission_rate: float = 0.001,  # 0.1% commission
-        slippage: float = 0.001,  # 0.1% slippage
-        position_size: float = 0.95,  # Position ratio
+        commission_rate: float = 0.001,
+        slippage: float = 0.001,
+        position_size: float = 0.95,
         min_holding_bars: int = DEFAULT_MIN_HOLDING_BARS,
         max_trades_per_day: int = DEFAULT_MAX_TRADES_PER_DAY,
         stop_loss_pct: float = DEFAULT_STOP_LOSS_PCT,
         max_drawdown_pct: float = DEFAULT_MAX_DRAWDOWN_PCT,
+        log_decisions: bool = False,
     ):
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
@@ -322,18 +330,17 @@ class BacktestEngine:
         self.max_trades_per_day = max_trades_per_day
         self.stop_loss_pct = stop_loss_pct
         self.max_drawdown_pct = max_drawdown_pct
+        self.log_decisions = log_decisions
 
-        # State variables
         self.cash = initial_capital
-        self.position = 0.0  # Position quantity
-        self.position_value = 0.0  # Position value
+        self.position = 0.0
+        self.position_value = 0.0
 
-        # Risk management state
-        self._entry_bar = -1  # Bar index when current position was opened
-        self._trades_today = 0  # Trade count for current day
-        self._current_day = None  # Track day changes
-        self._peak_equity = initial_capital  # Track peak equity for drawdown
-        self._stopped = False  # Circuit breaker flag
+        self._entry_bar = -1
+        self._trades_today = 0
+        self._current_day = None
+        self._peak_equity = initial_capital
+        self._stopped = False
 
         logger.info("Backtest engine initialized")
         logger.info(f"   Initial capital: ${initial_capital:,.2f}")
@@ -364,19 +371,18 @@ class BacktestEngine:
         """
         result = BacktestResult()
 
-        # Validate input data
         if df.empty:
             raise ValueError("Input data is empty")
         if "close" not in df.columns:
             raise ValueError("Data missing 'close' column")
 
-        # Generate signals
+        self.reset()
+
         df = strategy.generate_signals(df.copy())
 
         if "signal" not in df.columns:
             raise ValueError("Strategy did not generate 'signal' column")
 
-        # Pre-extract arrays to avoid iterrows() overhead
         timestamps = df.index
         prices = df["close"].values
         signals = df["signal"].values.astype(int)
@@ -389,17 +395,13 @@ class BacktestEngine:
         for i in range(len(df)):
             timestamp = timestamps[i]
             price = prices[i]
-            signal = signals[i]
+            signal = int(signals[i])
 
-            # --- Risk management checks ---
-
-            # Day tracking for max trades per day
             current_day = timestamp.date() if hasattr(timestamp, "date") else timestamp
             if self._current_day != current_day:
                 self._current_day = current_day
                 self._trades_today = 0
 
-            # Drawdown circuit breaker check
             total_value = self.cash + self.position * price
             if total_value > self._peak_equity:
                 self._peak_equity = total_value
@@ -414,20 +416,15 @@ class BacktestEngine:
                 equity_curve[i] = total_value
                 continue
 
-            # Stop-loss check: force sell if unrealized loss exceeds threshold
-            if self.position > 0 and self.position_value > 0:
+            if self.position > 0:
                 entry_price = self.position_value / self.position
-                if entry_price > 0 and (entry_price - price) / entry_price >= self.stop_loss_pct:
-                    self._execute_sell(timestamp, price, coin, result, df.iloc[i], force=True)
+                if (entry_price - price) / entry_price >= self.stop_loss_pct:
+                    self._execute_sell(timestamp, price, coin, result, signal, force=True)
                     self._trades_today += 1
 
-            # Recalculate total value after potential stop-loss sell
             total_value = self.cash + self.position * price
             equity_curve[i] = total_value
 
-            # --- Trading logic with risk management constraints ---
-
-            # Min holding period check: cannot sell until enough bars have passed
             can_sell = self._entry_bar < 0 or (i - self._entry_bar >= self.min_holding_bars)
 
             if (
@@ -435,66 +432,61 @@ class BacktestEngine:
                 and self.position == 0
                 and self._trades_today < self.max_trades_per_day
             ):
-                self._execute_buy(timestamp, price, coin, result, df.iloc[i])
+                self._execute_buy(timestamp, price, coin, result, signal)
                 self._entry_bar = i
                 self._trades_today += 1
 
             elif signal == SIGNAL_SELL and self.position > 0 and can_sell:
-                self._execute_sell(timestamp, price, coin, result, df.iloc[i])
+                self._execute_sell(timestamp, price, coin, result, signal)
                 self._trades_today += 1
 
-            # Log each step's state
-            result.add_decision(
-                timestamp=timestamp,
-                decision=(
-                    "hold" if signal == SIGNAL_HOLD else ("buy" if signal == SIGNAL_BUY else "sell")
-                ),
-                reason=(
-                    f"Signal: {signal}, Price: {price:.2f}, "
-                    f"Cash: {self.cash:.2f}, Position: {self.position:.6f}"
-                ),
-                price=price,
-                cash=self.cash,
-                position=self.position,
-                total_value=total_value,
-                signal=signal,
-            )
+            if self.log_decisions:
+                result.add_decision(
+                    timestamp=timestamp,
+                    decision=SIGNAL_TO_ACTION[signal],
+                    reason=(
+                        f"Signal: {signal}, Price: {price:.2f}, "
+                        f"Cash: {self.cash:.2f}, Position: {self.position:.6f}"
+                    ),
+                    price=price,
+                    cash=self.cash,
+                    position=self.position,
+                    total_value=total_value,
+                    signal=signal,
+                )
 
-        # Close final position (if still holding)
         if self.position > 0:
             final_price = df["close"].iloc[-1]
-            self._execute_sell(df.index[-1], final_price, coin, result, df.iloc[-1], force=True)
+            self._execute_sell(
+                df.index[-1], final_price, coin, result, int(signals[-1]), force=True
+            )
 
-        # Calculate results
         result.equity_curve = pd.Series(equity_curve, index=timestamps)
         result.daily_returns = result.equity_curve.pct_change().dropna()
         result.cumulative_returns = (result.equity_curve / result.equity_curve.iloc[0] - 1) * 100
 
-        # Calculate metrics
         result.calculate_metrics()
 
-        # Calculate cost analysis
         total_cost = 0.0
         for trade in result.trades:
-            total_cost += trade.value * self.commission_rate  # commission
-            total_cost += trade.value * self.slippage  # slippage impact
+            total_cost += trade.value * (self.commission_rate + self.slippage)
         result.metrics["total_cost"] = round(total_cost, 2)
         result.metrics["cost_drag_pct"] = round(total_cost / self.initial_capital * 100, 2)
 
-        # Output results
         logger.info("Backtest completed")
         logger.info(f"   Final assets: ${result.equity_curve.iloc[-1]:,.2f}")
         logger.info(f"   Total return: {result.metrics.get('total_return_pct', 0):.2f}%")
         logger.info(f"   Trade count: {len(result.trades) // 2}")
 
-        # Reset risk management state for potential re-use
-        self._stopped = False
-        self._peak_equity = self.initial_capital
-
         return result
 
     def _execute_buy(
-        self, timestamp: datetime, price: float, coin: str, result: BacktestResult, row: pd.Series
+        self,
+        timestamp: datetime,
+        price: float,
+        coin: str,
+        result: BacktestResult,
+        signal: int,
     ) -> None:
         """
         Execute buy operation
@@ -504,30 +496,26 @@ class BacktestEngine:
             price: Current price
             coin: Coin symbol
             result: BacktestResult object
-            row: Current data row
+            signal: Strategy signal that triggered this trade
         """
-        # Apply slippage (price increases on buy)
         executed_price = price * (1 + self.slippage)
 
-        # Calculate buy amount (after deducting commission)
         position_value = self.cash * self.position_size
         commission = position_value * self.commission_rate
         quantity = (position_value - commission) / executed_price
 
-        # Update state
         self.position = quantity
         self.position_value = position_value
         self.cash -= position_value
 
-        # Record trade
         trade = Trade(
             timestamp=timestamp,
-            action="buy",
+            action=ACTION_BUY,
             price=executed_price,
             quantity=quantity,
             value=position_value,
             coin=coin,
-            strategy_signal=int(row["signal"]),
+            strategy_signal=signal,
         )
         result.add_trade(trade)
 
@@ -543,7 +531,7 @@ class BacktestEngine:
         price: float,
         coin: str,
         result: BacktestResult,
-        row: pd.Series,
+        signal: int,
         force: bool = False,
     ) -> None:
         """
@@ -554,35 +542,29 @@ class BacktestEngine:
             price: Current price
             coin: Coin symbol
             result: BacktestResult object
-            row: Current data row
+            signal: Strategy signal that triggered this trade (overridden to
+                ``FORCED_SELL_SIGNAL`` when ``force`` is True)
             force: Whether this is a forced liquidation (default False)
         """
-        # Apply slippage (price decreases on sell)
         executed_price = price * (1 - self.slippage)
 
-        # Get position quantity (save before updating)
         sell_quantity = self.position
-
-        # Calculate sell value
         sell_value = sell_quantity * executed_price
         commission = sell_value * self.commission_rate
         net_value = sell_value - commission
 
-        # Update state
         self.cash += net_value
         self.position = 0.0
         self.position_value = 0.0
 
-        # Record trade
-        signal_value = int(row["signal"]) if not force else -2
         trade = Trade(
             timestamp=timestamp,
-            action="sell",
+            action=ACTION_SELL,
             price=executed_price,
             quantity=sell_quantity,
             value=net_value,
             coin=coin,
-            strategy_signal=signal_value,
+            strategy_signal=FORCED_SELL_SIGNAL if force else signal,
         )
         result.add_trade(trade)
 
@@ -593,11 +575,10 @@ class BacktestEngine:
         )
 
     def reset(self) -> None:
-        """Reset engine state to initial values, including risk management state"""
+        """Reset engine state (cash, position, risk-management counters) to initial values."""
         self.cash = self.initial_capital
         self.position = 0.0
         self.position_value = 0.0
-        # Reset risk management state
         self._entry_bar = -1
         self._trades_today = 0
         self._current_day = None
@@ -607,10 +588,8 @@ class BacktestEngine:
 
 
 if __name__ == "__main__":
-    # Simple test
     from strategies import MovingAverageCrossStrategy
 
-    # Create test data
     np.random.seed(42)
     dates = pd.date_range("2023-01-01", periods=100, freq="D")
     prices = 100 + np.cumsum(np.random.randn(100) * 2)

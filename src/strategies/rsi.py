@@ -12,7 +12,7 @@ Usage example:
 
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import forward_fill_position, calculate_rsi, add_trend_filter
+from strategies._helpers import forward_fill_position, calculate_rsi, apply_trend_filter
 from strategies.constants import (
     DEFAULT_RSI_PERIOD,
     DEFAULT_RSI_OVERSOLD,
@@ -83,10 +83,12 @@ class RSIStrategy(TradingStrategy):
             (df["rsi"] < self.overbought) & (df["rsi"].shift(1) >= self.overbought), "signal"
         ] = -1
 
+        df = apply_trend_filter(
+            df,
+            self.trend_filter_enabled,
+            self.trend_filter_window,
+            self.trend_filter_tolerance,
+        )
         df = forward_fill_position(df)
-
-        if self.trend_filter_enabled:
-            df = add_trend_filter(df, self.trend_filter_window, self.trend_filter_tolerance)
-            df.loc[~df["trend_filter"], "signal"] = 0
 
         return df

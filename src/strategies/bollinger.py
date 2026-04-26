@@ -12,7 +12,7 @@ Usage example:
 
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import forward_fill_position, add_trend_filter
+from strategies._helpers import forward_fill_position, apply_trend_filter
 from strategies.constants import (
     DEFAULT_BB_WINDOW,
     DEFAULT_BB_NUM_STD,
@@ -107,10 +107,12 @@ class BollingerBandsStrategy(TradingStrategy):
             "signal",
         ] = -1
 
+        df = apply_trend_filter(
+            df,
+            self.trend_filter_enabled,
+            self.trend_filter_window,
+            self.trend_filter_tolerance,
+        )
         df = forward_fill_position(df)
-
-        if self.trend_filter_enabled:
-            df = add_trend_filter(df, self.trend_filter_window, self.trend_filter_tolerance)
-            df.loc[~df["trend_filter"], "signal"] = 0
 
         return df

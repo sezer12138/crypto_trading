@@ -18,7 +18,7 @@ Usage example:
 
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import convert_to_event_signals, forward_fill_position, add_trend_filter
+from strategies._helpers import convert_to_event_signals, forward_fill_position, apply_trend_filter
 from strategies.constants import (
     DEFAULT_MEAN_REVERSION_WINDOW,
     DEFAULT_ENTRY_Z,
@@ -94,34 +94,25 @@ class MeanReversionStrategy(TradingStrategy):
         """
         df = df.copy()
 
-        # Calculate Z-score
         df["mean"] = df["close"].rolling(window=self.window).mean()
         df["std"] = df["close"].rolling(window=self.window).std()
         # Division-by-zero guard: when std is 0 (flat market), zscore is 0
         df["zscore"] = (df["close"] - df["mean"]) / df["std"].replace(0, float("nan"))
         df["zscore"] = df["zscore"].fillna(0)
 
-        # Set state-based signals from Z-score thresholds
         df["signal"] = 0
-
-        # Buy when Z-score is below -entry_z (oversold)
         df.loc[df["zscore"] < -self.entry_z, "signal"] = 1
-
-        # Sell when Z-score is above entry_z (overbought)
         df.loc[df["zscore"] > self.entry_z, "signal"] = -1
-
-        # Close position when reverting to mean (overrides entry signals)
+        # exit_z overrides entry signals when reverting to mean
         df.loc[abs(df["zscore"]) < self.exit_z, "signal"] = 0
 
-        # Convert state-based signals to event-based (keep only first bar of each change)
         df = convert_to_event_signals(df)
-
-        # Apply optional trend filter to suppress signals in trending markets
-        if self.trend_filter_enabled:
-            df = add_trend_filter(df, self.trend_filter_window, self.trend_filter_tolerance)
-            df.loc[~df["trend_filter"], "signal"] = 0
-
-        # Forward fill position to maintain state between signals
+        df = apply_trend_filter(
+            df,
+            self.trend_filter_enabled,
+            self.trend_filter_window,
+            self.trend_filter_tolerance,
+        )
         df = forward_fill_position(df)
 
         return df

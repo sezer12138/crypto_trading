@@ -99,17 +99,9 @@ def convert_to_event_signals(df: pd.DataFrame) -> pd.DataFrame:
         >>> df['signal'].tolist()
         [0, 0, 1, 0, 0, -1, 0, 0, 1, 0]
     """
-    signal = df["signal"].values.copy()
-    prev = 0
-    for i in range(len(signal)):
-        if signal[i] == prev:
-            signal[i] = 0
-        elif signal[i] != 0:
-            prev = signal[i]
-        # If signal[i] == 0, reset prev to 0
-        else:
-            prev = 0
-    df["signal"] = signal.astype(int)
+    s = df["signal"].values.astype(int)
+    prev = np.concatenate(([0], s[:-1]))
+    df["signal"] = np.where(s != prev, s, 0).astype(int)
     return df
 
 
@@ -137,6 +129,27 @@ def add_trend_filter(
     trend_ma = df["close"].rolling(window=trend_window).mean()
     deviation = (df["close"] - trend_ma) / trend_ma.replace(0, float("nan"))
     df["trend_filter"] = deviation.abs() < trend_tolerance
+    return df
+
+
+def apply_trend_filter(
+    df: pd.DataFrame,
+    enabled: bool,
+    window: int,
+    tolerance: float,
+) -> pd.DataFrame:
+    """
+    Conditionally compute the trend filter and zero out signals in trending periods.
+
+    No-op when ``enabled`` is False. Otherwise calls ``add_trend_filter`` and zeros the
+    ``signal`` column wherever ``trend_filter`` is False (strong trend). Should be
+    applied before ``forward_fill_position`` so the derived position column reflects
+    the filtered signals.
+    """
+    if not enabled:
+        return df
+    df = add_trend_filter(df, window, tolerance)
+    df.loc[~df["trend_filter"], "signal"] = 0
     return df
 
 
