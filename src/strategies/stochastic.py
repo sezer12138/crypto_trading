@@ -13,8 +13,13 @@ Usage example:
 
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import forward_fill_position
-from strategies.constants import STOCHASTIC_OVERSOLD, STOCHASTIC_OVERBOUGHT
+from strategies._helpers import forward_fill_position, add_trend_filter
+from strategies.constants import (
+    STOCHASTIC_OVERSOLD,
+    STOCHASTIC_OVERBOUGHT,
+    TREND_FILTER_WINDOW,
+    TREND_FILTER_TOLERANCE,
+)
 
 
 class StochasticStrategy(TradingStrategy):
@@ -33,17 +38,31 @@ class StochasticStrategy(TradingStrategy):
         k_period: K line calculation period (default 14)
         d_period: D line smoothing period (default 3)
         smooth: K line pre-smoothing period (default 3)
+        trend_filter_enabled: Enable trend filter to suppress signals in strong trends (default False)
+        trend_filter_window: Window for trend MA calculation (default 50)
+        trend_filter_tolerance: Max deviation from MA for ranging market (default 0.03)
 
     Generated indicator columns:
         k: K line value (range 0-100)
         d: D line value
     """
 
-    def __init__(self, k_period: int = 14, d_period: int = 3, smooth: int = 3):
+    def __init__(
+        self,
+        k_period: int = 14,
+        d_period: int = 3,
+        smooth: int = 3,
+        trend_filter_enabled: bool = False,
+        trend_filter_window: int = TREND_FILTER_WINDOW,
+        trend_filter_tolerance: float = TREND_FILTER_TOLERANCE,
+    ):
         super().__init__("Stochastic_Strategy")
         self.k_period = k_period
         self.d_period = d_period
         self.smooth = smooth
+        self.trend_filter_enabled = trend_filter_enabled
+        self.trend_filter_window = trend_filter_window
+        self.trend_filter_tolerance = trend_filter_tolerance
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -80,15 +99,24 @@ class StochasticStrategy(TradingStrategy):
 
         # Buy when K crosses above D in oversold zone
         df.loc[
-            (df["k"] > df["d"]) & (df["k"].shift(1) <= df["d"].shift(1)) & (df["k"] < STOCHASTIC_OVERSOLD),
+            (df["k"] > df["d"])
+            & (df["k"].shift(1) <= df["d"].shift(1))
+            & (df["k"] < STOCHASTIC_OVERSOLD),
             "signal",
         ] = 1
 
         # Sell when K crosses below D in overbought zone
         df.loc[
-            (df["k"] < df["d"]) & (df["k"].shift(1) >= df["d"].shift(1)) & (df["k"] > STOCHASTIC_OVERBOUGHT),
+            (df["k"] < df["d"])
+            & (df["k"].shift(1) >= df["d"].shift(1))
+            & (df["k"] > STOCHASTIC_OVERBOUGHT),
             "signal",
         ] = -1
 
         df = forward_fill_position(df)
+
+        if self.trend_filter_enabled:
+            df = add_trend_filter(df, self.trend_filter_window, self.trend_filter_tolerance)
+            df.loc[~df["trend_filter"], "signal"] = 0
+
         return df

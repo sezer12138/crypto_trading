@@ -88,8 +88,13 @@ class ATRStopLossStrategy(TradingStrategy):
         support = df["close"] - df["atr"] * self.multiplier
         resistance = df["close"] + df["atr"] * self.multiplier
 
-        df.loc[uptrend & (df["low"] < support.shift(1)) & (df["close"] > support.shift(1)), "signal"] = 1
-        df.loc[downtrend & (df["high"] > resistance.shift(1)) & (df["close"] < resistance.shift(1)), "signal"] = -1
+        df.loc[
+            uptrend & (df["low"] < support.shift(1)) & (df["close"] > support.shift(1)), "signal"
+        ] = 1
+        df.loc[
+            downtrend & (df["high"] > resistance.shift(1)) & (df["close"] < resistance.shift(1)),
+            "signal",
+        ] = -1
 
         df = forward_fill_position(df)
         return df

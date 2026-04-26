@@ -36,7 +36,12 @@ class MACDStrategy(TradingStrategy):
         macd_hist: MACD histogram (MACD - signal line)
     """
 
-    def __init__(self, fast: int = DEFAULT_MACD_FAST, slow: int = DEFAULT_MACD_SLOW, signal: int = DEFAULT_MACD_SIGNAL):
+    def __init__(
+        self,
+        fast: int = DEFAULT_MACD_FAST,
+        slow: int = DEFAULT_MACD_SLOW,
+        signal: int = DEFAULT_MACD_SIGNAL,
+    ):
         super().__init__("MACD_Strategy")
         self.fast = fast
         self.slow = slow

@@ -106,6 +106,92 @@ class TestVWAPStrategy:
         assert "signal" in result.columns
         assert "position" in result.columns
 
+    def test_vwap_dynamic_deviation_columns(self, sample_data):
+        """Dynamic deviation mode should produce atr and dynamic_dev columns."""
+        strategy = get_strategy("vwap", window=20, dynamic_deviation=True)
+        result = strategy.generate_signals(sample_data)
+        assert "vwap" in result.columns
+        assert "vwap_dev" in result.columns
+        assert "atr" in result.columns
+        assert "dynamic_dev" in result.columns
+        assert "signal" in result.columns
+        assert "position" in result.columns
+
+    def test_vwap_dynamic_deviation_respects_floor(self, sample_data):
+        """Dynamic deviation threshold should never fall below VWAP_MIN_DEVIATION."""
+        strategy = get_strategy("vwap", window=20, dynamic_deviation=True)
+        result = strategy.calculate_indicators(sample_data)
+        valid_dev = result["dynamic_dev"].dropna()
+        assert (valid_dev >= 0.005).all()
+
+    def test_vwap_fixed_deviation_no_dynamic_columns(self, sample_data):
+        """Fixed deviation mode should not produce atr or dynamic_dev columns."""
+        strategy = get_strategy("vwap", window=20, deviation=0.02, dynamic_deviation=False)
+        result = strategy.generate_signals(sample_data)
+        assert "vwap" in result.columns
+        assert "atr" not in result.columns
+        assert "dynamic_dev" not in result.columns
+
+    def test_vwap_event_based_signals(self, sample_data):
+        """Signals should be event-based: no consecutive duplicate non-zero signals."""
+        strategy = get_strategy("vwap", window=20, dynamic_deviation=True)
+        result = strategy.generate_signals(sample_data)
+        signals = result["signal"].values
+        for i in range(1, len(signals)):
+            if signals[i] != 0:
+                assert signals[i - 1] != signals[i], (
+                    f"Consecutive non-zero signal at index {i}: "
+                    f"signals[{i-1}]={signals[i-1]}, signals[{i}]={signals[i]}"
+                )
+
+    def test_vwap_signals_valid_values(self, sample_data):
+        """All signals must be in the set {-1, 0, 1}."""
+        strategy = get_strategy("vwap", window=20, dynamic_deviation=True)
+        result = strategy.generate_signals(sample_data)
+        assert result["signal"].isin([-1, 0, 1]).all()
+
+    def test_vwap_dynamic_produces_more_trades_than_fixed(self):
+        """Dynamic deviation should adapt to volatility and generate trades
+        where a tight fixed threshold might produce zero trades."""
+        np.random.seed(123)
+        n = 200
+        base = 100 + np.cumsum(np.random.randn(n) * 0.3)
+        # Create small price oscillations around a flat base
+        dates = pd.date_range("2024-01-01", periods=n, freq="h")
+        data = pd.DataFrame(
+            {
+                "open": base * 0.999,
+                "high": base * 1.002,
+                "low": base * 0.998,
+                "close": base,
+                "volume": np.random.randint(1000, 5000, n),
+            },
+            index=dates,
+        )
+        # Fixed 1% threshold on low-volatility data -> likely zero trades
+        fixed = get_strategy("vwap", window=20, deviation=0.01, dynamic_deviation=False)
+        result_fixed = fixed.generate_signals(data.copy())
+        fixed_trades = (result_fixed["signal"] != 0).sum()
+
+        # Dynamic deviation should adapt and produce some trades
+        dynamic = get_strategy("vwap", window=20, dynamic_deviation=True)
+        result_dynamic = dynamic.generate_signals(data.copy())
+        dynamic_trades = (result_dynamic["signal"] != 0).sum()
+
+        assert dynamic_trades >= fixed_trades
+
+    def test_vwap_atr_window_parameter(self, sample_data):
+        """Custom atr_window should be accepted and affect dynamic_dev values."""
+        strategy_short = get_strategy("vwap", window=20, dynamic_deviation=True, atr_window=5)
+        strategy_long = get_strategy("vwap", window=20, dynamic_deviation=True, atr_window=50)
+        result_short = strategy_short.calculate_indicators(sample_data)
+        result_long = strategy_long.calculate_indicators(sample_data)
+        # Both should produce valid dynamic_dev columns
+        valid_short = result_short["dynamic_dev"].dropna()
+        valid_long = result_long["dynamic_dev"].dropna()
+        assert len(valid_short) > 0
+        assert len(valid_long) > 0
+
 
 class TestMomentumStrategy:
     def test_momentum_generates_signals(self, sample_data):

@@ -12,8 +12,13 @@ Usage example:
 
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import forward_fill_position
-from strategies.constants import DEFAULT_BB_WINDOW, DEFAULT_BB_NUM_STD
+from strategies._helpers import forward_fill_position, add_trend_filter
+from strategies.constants import (
+    DEFAULT_BB_WINDOW,
+    DEFAULT_BB_NUM_STD,
+    TREND_FILTER_WINDOW,
+    TREND_FILTER_TOLERANCE,
+)
 
 
 class BollingerBandsStrategy(TradingStrategy):
@@ -26,6 +31,9 @@ class BollingerBandsStrategy(TradingStrategy):
     Args:
         window: Moving average window (default 20)
         num_std: Standard deviation multiplier (default 2.0)
+        trend_filter_enabled: Enable trend filter to suppress signals in strong trends (default False)
+        trend_filter_window: Window for trend MA calculation (default 50)
+        trend_filter_tolerance: Max deviation from MA for ranging market (default 0.03)
 
     Generated indicator columns:
         middle_band: Middle band (moving average)
@@ -35,10 +43,20 @@ class BollingerBandsStrategy(TradingStrategy):
         bandwidth: Bandwidth (upper-lower band difference / middle band)
     """
 
-    def __init__(self, window: int = DEFAULT_BB_WINDOW, num_std: float = DEFAULT_BB_NUM_STD):
+    def __init__(
+        self,
+        window: int = DEFAULT_BB_WINDOW,
+        num_std: float = DEFAULT_BB_NUM_STD,
+        trend_filter_enabled: bool = False,
+        trend_filter_window: int = TREND_FILTER_WINDOW,
+        trend_filter_tolerance: float = TREND_FILTER_TOLERANCE,
+    ):
         super().__init__("Bollinger_Bands")
         self.window = window
         self.num_std = num_std
+        self.trend_filter_enabled = trend_filter_enabled
+        self.trend_filter_window = trend_filter_window
+        self.trend_filter_tolerance = trend_filter_tolerance
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -55,7 +73,9 @@ class BollingerBandsStrategy(TradingStrategy):
         df["std"] = df["close"].rolling(window=self.window).std()
         df["upper_band"] = df["middle_band"] + (df["std"] * self.num_std)
         df["lower_band"] = df["middle_band"] - (df["std"] * self.num_std)
-        df["bandwidth"] = (df["upper_band"] - df["lower_band"]) / df["middle_band"].replace(0, float("nan"))
+        df["bandwidth"] = (df["upper_band"] - df["lower_band"]) / df["middle_band"].replace(
+            0, float("nan")
+        )
         return df
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -88,4 +108,9 @@ class BollingerBandsStrategy(TradingStrategy):
         ] = -1
 
         df = forward_fill_position(df)
+
+        if self.trend_filter_enabled:
+            df = add_trend_filter(df, self.trend_filter_window, self.trend_filter_tolerance)
+            df.loc[~df["trend_filter"], "signal"] = 0
+
         return df

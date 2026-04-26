@@ -94,7 +94,7 @@ class MartingaleStrategy(TradingStrategy):
         if price_change <= -stop_threshold:
             if current_step < self.max_steps:
                 # Double buy, update average entry price
-                total_weight = sum(self.multiplier ** j for j in range(current_step + 2))
+                total_weight = sum(self.multiplier**j for j in range(current_step + 2))
                 last_weight = self.multiplier ** (current_step + 1)
                 new_entry_price = (
                     entry_price * (total_weight - last_weight) + current_price * last_weight

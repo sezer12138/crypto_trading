@@ -77,15 +77,17 @@ class MomentumStrategy(TradingStrategy):
 
         # Buy when ROC turns positive and momentum is positive
         df.loc[
-            (df["roc"] > self.threshold) & (df["momentum_norm"] > 0) &
-            (df["roc"].shift(1) <= self.threshold),
+            (df["roc"] > self.threshold)
+            & (df["momentum_norm"] > 0)
+            & (df["roc"].shift(1) <= self.threshold),
             "signal",
         ] = 1
 
         # Sell when ROC turns negative and momentum is negative
         df.loc[
-            (df["roc"] < -self.threshold) & (df["momentum_norm"] < 0) &
-            (df["roc"].shift(1) >= -self.threshold),
+            (df["roc"] < -self.threshold)
+            & (df["momentum_norm"] < 0)
+            & (df["roc"].shift(1) >= -self.threshold),
             "signal",
         ] = -1
 
