@@ -1,47 +1,56 @@
-# Crypto Trading Data Fetcher - Git Ignore
+# =====================================================
+# crypto_trading - .gitignore
+# =====================================================
 
-# Python
+# --- OS / Editor metadata ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- Hidden directories (.claude/, .vscode/, .idea/, .pytest_cache/,
+#     .venv/, .tox/, .ipynb_checkpoints/, .eggs/, etc.) ---
+.*/
+
+# --- Python build / packaging ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.egg
+*.egg-info/
 .Python
+.installed.cfg
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
-lib/
-lib64/
 parts/
 sdist/
-var/
 wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+lib/
+lib64/
+var/
 
-# Virtual environments
+# --- Virtual environments (non-hidden names) ---
 venv/
-ENV/
 env/
-.venv
+ENV/
 
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
+# --- Environment / secrets ---
+.env
+.env.local
+config/.env
 
-# Logs
+# --- Logs / Results / Coverage ---
 logs/
-logs/*.log
-logs/*.log.*
+results/
+htmlcov/
+.coverage
 
-# Data files (raw data should not be committed)
+# --- Data files (raw inputs are not committed) ---
 data/raw/*.csv
 data/raw/*.json
 data/processed/*.csv
@@ -49,37 +58,12 @@ data/processed/*.json
 data/historical/*.csv
 data/historical/*.json
 
-# Config with sensitive info
-config/.env
-.env
-.env.local
-
-# OS files
-Thumbs.db
-.DS_Store
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-
-# Results
-results/
-
-# Claude Code
-.claude/
-
-# Optimization task files
-optimization_tasks.json
-
-# Temporary files
+# --- Temporary files ---
 tmp/
 temp/
 *.tmp
 
-# Docs
+# --- Project-specific ---
+CLAUDE.md
 docs/
+optimization_tasks.json
