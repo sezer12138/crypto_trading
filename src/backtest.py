@@ -411,9 +411,14 @@ class BacktestEngine:
                 else 0
             )
             if drawdown >= self.max_drawdown_pct:
+                if self.position > 0:
+                    self._execute_sell(
+                        timestamp, price, coin, result, FORCED_SELL_SIGNAL, force=True
+                    )
+                    self._trades_today += 1
                 self._stopped = True
             if self._stopped:
-                equity_curve[i] = total_value
+                equity_curve[i] = self.cash
                 continue
 
             if self.position > 0:
