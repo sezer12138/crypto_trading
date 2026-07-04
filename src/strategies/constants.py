@@ -76,6 +76,10 @@ DEFAULT_MIN_HOLDING_BARS = 5  # Minimum holding period (bars) after entry
 DEFAULT_MAX_TRADES_PER_DAY = 6  # Maximum number of trades per day
 DEFAULT_STOP_LOSS_PCT = 0.05  # Per-trade stop-loss (5%)
 DEFAULT_MAX_DRAWDOWN_PCT = 0.20  # Max drawdown circuit breaker (20%)
+DEFAULT_ATR_STOP_LOSS_MULTIPLIER = 2.0  # ATR multiplier for dynamic stop-loss
+DEFAULT_MAX_CONSECUTIVE_LOSSES = 3  # Max consecutive stop-loss hits before cooldown
+DEFAULT_CONSECUTIVE_LOSS_COOLDOWN = 24  # Bars to pause after consecutive losses (24h for 1h data)
+DEFAULT_BREAKER_COOLDOWN_BARS = 720  # Bars before breaker resets (30 days for 1h data)
 
 # ============================================================
 # VWAP dynamic deviation parameters

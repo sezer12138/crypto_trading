@@ -37,6 +37,10 @@ from strategies.constants import (
     DEFAULT_MAX_TRADES_PER_DAY,
     DEFAULT_MIN_HOLDING_BARS,
     DEFAULT_STOP_LOSS_PCT,
+    DEFAULT_ATR_STOP_LOSS_MULTIPLIER,
+    DEFAULT_MAX_CONSECUTIVE_LOSSES,
+    DEFAULT_CONSECUTIVE_LOSS_COOLDOWN,
+    DEFAULT_BREAKER_COOLDOWN_BARS,
 )
 
 # Configure logging
@@ -321,6 +325,11 @@ class BacktestEngine:
         stop_loss_pct: float = DEFAULT_STOP_LOSS_PCT,
         max_drawdown_pct: float = DEFAULT_MAX_DRAWDOWN_PCT,
         log_decisions: bool = False,
+        use_atr_stop_loss: bool = False,
+        atr_stop_loss_multiplier: float = DEFAULT_ATR_STOP_LOSS_MULTIPLIER,
+        max_consecutive_losses: int = DEFAULT_MAX_CONSECUTIVE_LOSSES,
+        consecutive_loss_cooldown: int = DEFAULT_CONSECUTIVE_LOSS_COOLDOWN,
+        breaker_cooldown_bars: int = 0,
     ):
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
@@ -331,6 +340,11 @@ class BacktestEngine:
         self.stop_loss_pct = stop_loss_pct
         self.max_drawdown_pct = max_drawdown_pct
         self.log_decisions = log_decisions
+        self.use_atr_stop_loss = use_atr_stop_loss
+        self.atr_stop_loss_multiplier = atr_stop_loss_multiplier
+        self.max_consecutive_losses = max_consecutive_losses
+        self.consecutive_loss_cooldown = consecutive_loss_cooldown
+        self.breaker_cooldown_bars = breaker_cooldown_bars
 
         self.cash = initial_capital
         self.position = 0.0
@@ -341,6 +355,9 @@ class BacktestEngine:
         self._current_day = None
         self._peak_equity = initial_capital
         self._stopped = False
+        self._consecutive_losses = 0
+        self._loss_cooldown_until = -1
+        self._breaker_triggered_at = -1
 
         logger.info("Backtest engine initialized")
         logger.info(f"   Initial capital: ${initial_capital:,.2f}")
@@ -351,6 +368,10 @@ class BacktestEngine:
         logger.info(f"   Max trades per day: {max_trades_per_day}")
         logger.info(f"   Stop-loss: {stop_loss_pct * 100:.1f}%")
         logger.info(f"   Max drawdown: {max_drawdown_pct * 100:.1f}%")
+        if use_atr_stop_loss:
+            logger.info(f"   ATR stop-loss multiplier: {atr_stop_loss_multiplier}")
+        if breaker_cooldown_bars > 0:
+            logger.info(f"   Breaker cooldown: {breaker_cooldown_bars} bars")
 
     def run_backtest(self, df: pd.DataFrame, strategy: object, coin: str = "BTC") -> BacktestResult:
         """
@@ -388,6 +409,26 @@ class BacktestEngine:
         signals = df["signal"].values.astype(int)
         equity_curve = np.empty(len(df))
 
+        # Pre-compute ATR for dynamic stop-loss (if enabled)
+        atr_values = None
+        atr_window = 14
+        if self.use_atr_stop_loss and "high" in df.columns and "low" in df.columns:
+            high = df["high"].values
+            low = df["low"].values
+            close_prev = np.roll(df["close"].values, 1)
+            close_prev[0] = df["close"].values[0]
+            tr = np.maximum(
+                high - low,
+                np.maximum(
+                    np.abs(high - close_prev),
+                    np.abs(low - close_prev),
+                ),
+            )
+            # Exponential moving average of true range, shifted to avoid look-ahead
+            atr_raw = pd.Series(tr).ewm(span=atr_window, adjust=False).mean().shift(1).values
+            atr_values = atr_raw
+            logger.info(f"   ATR stop-loss: enabled (multiplier={self.atr_stop_loss_multiplier}, window={atr_window})")
+
         logger.info(f"Starting backtest for {coin}...")
         logger.info(f"   Strategy: {strategy.name}")
         logger.info(f"   Data points: {len(df)}")
@@ -417,33 +458,92 @@ class BacktestEngine:
                     )
                     self._trades_today += 1
                 self._stopped = True
+                self._breaker_triggered_at = i
             if self._stopped:
-                equity_curve[i] = self.cash
-                continue
+                if (
+                    self.breaker_cooldown_bars > 0
+                    and i - self._breaker_triggered_at >= self.breaker_cooldown_bars
+                ):
+                    self._stopped = False
+                    self._peak_equity = self.cash
+                    self._breaker_triggered_at = -1
+                    logger.info(
+                        f"Breaker cooldown elapsed at bar {i}, trading resumed "
+                        f"(equity: ${self.cash:,.2f})"
+                    )
+                else:
+                    equity_curve[i] = self.cash
+                    continue
 
             if self.position > 0:
                 entry_price = self.position_value / self.position
-                if (entry_price - price) / entry_price >= self.stop_loss_pct:
+                stop_triggered = False
+                if self.use_atr_stop_loss and atr_values is not None:
+                    current_atr = atr_values[i]
+                    if current_atr > 0:
+                        stop_distance = self.atr_stop_loss_multiplier * current_atr
+                        if (entry_price - price) >= stop_distance:
+                            stop_triggered = True
+                elif (entry_price - price) / entry_price >= self.stop_loss_pct:
+                    stop_triggered = True
+
+                if stop_triggered:
+                    pre_sell_entry = entry_price
                     self._execute_sell(timestamp, price, coin, result, signal, force=True)
                     self._trades_today += 1
+                    # Track consecutive stop-losses for cooldown
+                    if price < pre_sell_entry:
+                        self._consecutive_losses += 1
+                        if self._consecutive_losses >= self.max_consecutive_losses:
+                            self._loss_cooldown_until = (
+                                i + self.consecutive_loss_cooldown
+                            )
+                            logger.warning(
+                                f"Consecutive loss limit ({self.max_consecutive_losses}) "
+                                f"reached, cooldown until bar {self._loss_cooldown_until}"
+                            )
+                            self._consecutive_losses = 0
+                    else:
+                        self._consecutive_losses = 0
 
             total_value = self.cash + self.position * price
             equity_curve[i] = total_value
 
             can_sell = self._entry_bar < 0 or (i - self._entry_bar >= self.min_holding_bars)
 
+            # Check loss cooldown before allowing new buy
+            in_loss_cooldown = (
+                self._loss_cooldown_until >= 0 and i < self._loss_cooldown_until
+            )
+
             if (
                 signal == SIGNAL_BUY
                 and self.position == 0
                 and self._trades_today < self.max_trades_per_day
+                and not in_loss_cooldown
             ):
                 self._execute_buy(timestamp, price, coin, result, signal)
                 self._entry_bar = i
                 self._trades_today += 1
 
             elif signal == SIGNAL_SELL and self.position > 0 and can_sell:
+                entry_price = self.position_value / self.position if self.position > 0 else 0
                 self._execute_sell(timestamp, price, coin, result, signal)
                 self._trades_today += 1
+                # Reset consecutive loss counter on profitable regular sell
+                if price >= entry_price:
+                    self._consecutive_losses = 0
+                else:
+                    self._consecutive_losses += 1
+                    if self._consecutive_losses >= self.max_consecutive_losses:
+                        self._loss_cooldown_until = (
+                            i + self.consecutive_loss_cooldown
+                        )
+                        logger.warning(
+                            f"Consecutive loss limit ({self.max_consecutive_losses}) "
+                            f"reached, cooldown until bar {self._loss_cooldown_until}"
+                        )
+                        self._consecutive_losses = 0
 
             if self.log_decisions:
                 result.add_decision(
@@ -589,6 +689,9 @@ class BacktestEngine:
         self._current_day = None
         self._peak_equity = self.initial_capital
         self._stopped = False
+        self._consecutive_losses = 0
+        self._loss_cooldown_until = -1
+        self._breaker_triggered_at = -1
         logger.info("Backtest engine reset")
 
 

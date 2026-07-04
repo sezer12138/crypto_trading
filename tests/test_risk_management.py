@@ -155,7 +155,10 @@ class TestMaxTradesPerDay:
         df = _make_df(prices, start="2024-01-01", freq="h", signals=signals)
 
         engine = BacktestEngine(
-            initial_capital=10000, max_trades_per_day=6, min_holding_bars=0
+            initial_capital=10000,
+            max_trades_per_day=6,
+            min_holding_bars=0,
+            max_consecutive_losses=999,  # disable loss cooldown for this test
         )
         result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
 
