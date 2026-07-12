@@ -210,6 +210,13 @@ class TestStochasticStrategy:
         assert "d" in result.columns
         assert "signal" in result.columns
 
+    def test_trend_filter_enabled_by_default(self):
+        """Mean-reversion strategies that benefit from filtering enable it by default."""
+        assert get_strategy("bollinger").trend_filter_enabled is True
+        assert get_strategy("mean_reversion").trend_filter_enabled is True
+        assert get_strategy("stochastic").trend_filter_enabled is True
+        assert get_strategy("rsi").trend_filter_enabled is False
+
 
 class TestStrategyFactoryComplete:
     def test_all_strategies_instantiate(self):

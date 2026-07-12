@@ -47,7 +47,7 @@ class MeanReversionStrategy(TradingStrategy):
         window: Rolling mean and standard deviation calculation window (default 20)
         entry_z: Entry Z-score threshold (default 2.0)
         exit_z: Exit Z-score threshold (default 0.5)
-        trend_filter_enabled: Whether to enable the trend filter (default False)
+        trend_filter_enabled: Whether to enable the trend filter (default True)
         trend_filter_window: Window for trend filter MA calculation (default 50)
         trend_filter_tolerance: Max deviation from MA for ranging market (default 0.03 = 3%)
 
@@ -63,7 +63,7 @@ class MeanReversionStrategy(TradingStrategy):
         window: int = DEFAULT_MEAN_REVERSION_WINDOW,
         entry_z: float = DEFAULT_ENTRY_Z,
         exit_z: float = DEFAULT_EXIT_Z,
-        trend_filter_enabled: bool = False,
+        trend_filter_enabled: bool = True,
         trend_filter_window: int = TREND_FILTER_WINDOW,
         trend_filter_tolerance: float = TREND_FILTER_TOLERANCE,
     ):

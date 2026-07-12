@@ -413,7 +413,7 @@ close < upper_band  AND  close[i-1] >= upper_band[i-1]
 |-------|---------|-------------|
 | `window` | 20 | Moving average / band calculation window |
 | `num_std` | 2.0 | Standard deviation multiplier |
-| `trend_filter_enabled` | `False` | Suppress signals in strong trends |
+| `trend_filter_enabled` | `True` | Suppress signals in strong trends |
 | `trend_filter_window` | 50 | Trend filter MA window |
 | `trend_filter_tolerance` | 0.03 | Max deviation from MA (3%) |
 
@@ -458,7 +458,7 @@ zscore = (close - mean) / std
 | `window` | 20 | Rolling mean/std window |
 | `entry_z` | 2.0 | Z-score entry threshold |
 | `exit_z` | 0.5 | Z-score exit threshold |
-| `trend_filter_enabled` | `False` | Suppress signals in strong trends |
+| `trend_filter_enabled` | `True` | Suppress signals in strong trends |
 | `trend_filter_window` | 50 | Trend filter MA window |
 | `trend_filter_tolerance` | 0.03 | Max deviation from MA (3%) |
 
@@ -509,7 +509,7 @@ k < d  AND  k[i-1] >= d[i-1]  AND  k > 80     # crossover in overbought zone
 | `k_period` | 14 | %K calculation period |
 | `d_period` | 3 | %D smoothing period |
 | `smooth` | 3 | %K pre-smoothing period |
-| `trend_filter_enabled` | `False` | Suppress signals in strong trends |
+| `trend_filter_enabled` | `True` | Suppress signals in strong trends |
 | `trend_filter_window` | 50 | Trend filter MA window |
 | `trend_filter_tolerance` | 0.03 | Max deviation from MA (3%) |
 

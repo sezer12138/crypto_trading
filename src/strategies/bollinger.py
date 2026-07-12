@@ -31,7 +31,7 @@ class BollingerBandsStrategy(TradingStrategy):
     Args:
         window: Moving average window (default 20)
         num_std: Standard deviation multiplier (default 2.0)
-        trend_filter_enabled: Enable trend filter to suppress signals in strong trends (default False)
+        trend_filter_enabled: Enable trend filter to suppress signals in strong trends (default True)
         trend_filter_window: Window for trend MA calculation (default 50)
         trend_filter_tolerance: Max deviation from MA for ranging market (default 0.03)
 
@@ -47,7 +47,7 @@ class BollingerBandsStrategy(TradingStrategy):
         self,
         window: int = DEFAULT_BB_WINDOW,
         num_std: float = DEFAULT_BB_NUM_STD,
-        trend_filter_enabled: bool = False,
+        trend_filter_enabled: bool = True,
         trend_filter_window: int = TREND_FILTER_WINDOW,
         trend_filter_tolerance: float = TREND_FILTER_TOLERANCE,
     ):
