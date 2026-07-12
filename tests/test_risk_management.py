@@ -293,6 +293,27 @@ class TestCostAnalysis:
         assert result.metrics["cost_drag_pct"] == 0.0
 
 
+class TestPerformanceAccounting:
+    """Regression tests for equity and return-frequency accounting."""
+
+    def test_final_equity_includes_forced_liquidation_costs(self):
+        """The last equity point must match cash after end-of-data liquidation."""
+        df = _make_df([100.0] * 49, signals=[SIGNAL_BUY] + [0] * 48)
+        engine = BacktestEngine(initial_capital=10000, min_holding_bars=0)
+
+        result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
+
+        assert result.equity_curve.iloc[-1] == pytest.approx(engine.cash)
+        assert result.metrics["total_return_pct"] < 0
+
+    def test_intraday_equity_is_resampled_before_daily_returns(self):
+        """Hourly input should produce one return per completed day, not per bar."""
+        df = _make_df([100.0] * 72, signals=[0] * 72)
+        result = BacktestEngine().run_backtest(df, IdentityStrategy(), coin="TEST")
+
+        assert len(result.daily_returns) == 2
+
+
 # ---------------------------------------------------------------------------
 # Reset method
 # ---------------------------------------------------------------------------

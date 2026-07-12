@@ -141,6 +141,7 @@ class BacktestResult:
     equity_curve: Optional[pd.Series] = None
     metrics: Dict[str, float] = field(default_factory=dict)
     decision_log: List[Dict[str, Any]] = field(default_factory=list)
+    initial_capital: Optional[float] = None
 
     def add_trade(self, trade: Trade) -> None:
         """
@@ -193,7 +194,12 @@ class BacktestResult:
             return {}
 
         # Basic metrics
-        total_return = (self.equity_curve.iloc[-1] / self.equity_curve.iloc[0] - 1) * 100
+        starting_equity = (
+            self.initial_capital
+            if self.initial_capital is not None
+            else float(self.equity_curve.iloc[0])
+        )
+        total_return = (self.equity_curve.iloc[-1] / starting_equity - 1) * 100
 
         # Calculate time span (days)
         days = (self.equity_curve.index[-1] - self.equity_curve.index[0]).days
@@ -218,17 +224,18 @@ class BacktestResult:
         drawdown = (self.equity_curve - cummax) / cummax
         max_drawdown = drawdown.min() * 100
 
-        # Win rate (profitability on sell trades) - O(n) single pass
+        # Win rate based on net round-trip cash flow, including commissions and slippage.
         profitable_sells = 0
         total_sells = 0
-        last_buy_price = None
+        last_buy_value = None
         for trade in self.trades:
             if trade.action == "buy":
-                last_buy_price = trade.price
+                last_buy_value = trade.value
             elif trade.action == "sell":
                 total_sells += 1
-                if last_buy_price is not None and trade.price > last_buy_price:
+                if last_buy_value is not None and trade.value > last_buy_value:
                     profitable_sells += 1
+                last_buy_value = None
 
         win_rate = (profitable_sells / total_sells * 100) if total_sells > 0 else 0.0
 
@@ -390,7 +397,7 @@ class BacktestEngine:
         Raises:
             ValueError: If input data is invalid
         """
-        result = BacktestResult()
+        result = BacktestResult(initial_capital=self.initial_capital)
 
         if df.empty:
             raise ValueError("Input data is empty")
@@ -506,9 +513,6 @@ class BacktestEngine:
                     else:
                         self._consecutive_losses = 0
 
-            total_value = self.cash + self.position * price
-            equity_curve[i] = total_value
-
             can_sell = self._entry_bar < 0 or (i - self._entry_bar >= self.min_holding_bars)
 
             # Check loss cooldown before allowing new buy
@@ -545,6 +549,10 @@ class BacktestEngine:
                         )
                         self._consecutive_losses = 0
 
+            # Record end-of-bar equity after all executions and their costs.
+            total_value = self.cash + self.position * price
+            equity_curve[i] = total_value
+
             if self.log_decisions:
                 result.add_decision(
                     timestamp=timestamp,
@@ -565,10 +573,14 @@ class BacktestEngine:
             self._execute_sell(
                 df.index[-1], final_price, coin, result, int(signals[-1]), force=True
             )
+            equity_curve[-1] = self.cash
 
         result.equity_curve = pd.Series(equity_curve, index=timestamps)
-        result.daily_returns = result.equity_curve.pct_change().dropna()
-        result.cumulative_returns = (result.equity_curve / result.equity_curve.iloc[0] - 1) * 100
+        daily_equity = result.equity_curve.resample("1D").last().dropna()
+        result.daily_returns = daily_equity.pct_change().dropna()
+        result.cumulative_returns = (
+            result.equity_curve / self.initial_capital - 1
+        ) * 100
 
         result.calculate_metrics()
 
