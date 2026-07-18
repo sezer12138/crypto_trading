@@ -203,7 +203,8 @@ engine = BacktestEngine(
     initial_capital=10000.0,  # 初始资金
     commission_rate=0.001,    # 手续费
     slippage=0.001,          # 滑点
-    position_size=0.95       # 仓位比例
+    position_size=0.95,      # 仓位比例
+    drawdown_breaker_enabled=True,
 )
 
 # 运行回测
@@ -221,6 +222,10 @@ print(result.metrics)
 
 # 保存决策日志
 result.save_logs('logs/backtest_decisions.json')
+```
+
+```bash
+python run_backtest.py --strategy momentum --disable-drawdown-breaker
 ```
 
 **决策日志结构：**

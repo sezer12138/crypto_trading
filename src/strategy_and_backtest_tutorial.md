@@ -918,7 +918,7 @@ The backtest engine includes four risk management controls, all configurable via
 | Min holding period | `min_holding_bars` | 5 | Minimum bars to hold before selling |
 | Max trades per day | `max_trades_per_day` | 6 | Hard cap on daily trade count |
 | Per-trade stop-loss | `stop_loss_pct` | 0.05 (5%) | Force-sell if unrealized loss exceeds threshold |
-| Drawdown circuit breaker | `max_drawdown_pct` | 0.20 (20%) | Halt all trading if total drawdown exceeds threshold |
+| Drawdown circuit breaker | `drawdown_breaker_enabled`, `max_drawdown_pct` | enabled; 0.20 (20%) | Force-liquidate and halt trading if total drawdown exceeds threshold |
 
 ```python
 # Strict risk management example
@@ -930,6 +930,24 @@ engine = BacktestEngine(
     max_drawdown_pct=0.15,      # Stop everything at 15% drawdown
 )
 ```
+
+The drawdown circuit breaker is enabled by default. Disable it to continue trading through
+drawdowns while retaining the other risk controls:
+
+```python
+engine = BacktestEngine(
+    initial_capital=10000,
+    drawdown_breaker_enabled=False,
+)
+```
+
+```bash
+python run_backtest.py --strategy momentum --disable-drawdown-breaker
+python run_backtest.py --compare --disable-drawdown-breaker
+```
+
+Disabling this breaker does not disable stop-losses and does not remove the
+`max_drawdown_pct` performance metric.
 
 ### Performance Metrics
 
