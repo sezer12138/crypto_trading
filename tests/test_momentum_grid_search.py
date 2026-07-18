@@ -1,5 +1,6 @@
 """Tests for the Momentum strategy grid-search tool."""
 
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +14,7 @@ from scripts.grid_search_momentum import (
     parse_arguments,
     parse_float_list,
     parse_int_list,
+    quiet_backtest_logs,
     rank_results,
     validate_winner,
     write_results,
@@ -405,3 +407,15 @@ def test_main_rejects_non_finite_capital(tmp_path, capsys):
 
     assert exit_code == 1
     assert "capital" in capsys.readouterr().err.lower()
+
+
+def test_quiet_backtest_logs_restores_previous_level():
+    logger = logging.getLogger("backtest")
+    previous_level = logger.level
+    logger.setLevel(logging.WARNING)
+    try:
+        with quiet_backtest_logs():
+            assert logger.level == logging.ERROR
+        assert logger.level == logging.WARNING
+    finally:
+        logger.setLevel(previous_level)

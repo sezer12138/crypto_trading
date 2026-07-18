@@ -3,7 +3,9 @@
 
 import argparse
 import math
+import logging
 import sys
+from contextlib import contextmanager
 from itertools import product
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, TypeVar
@@ -30,6 +32,18 @@ METRIC_NAMES = (
 DEFAULT_ROC_PERIODS = [5, 10, 15, 20, 30]
 DEFAULT_MOMENTUM_PERIODS = [5, 10, 14, 20, 30]
 DEFAULT_THRESHOLDS = [0.005, 0.01, 0.015, 0.02, 0.03, 0.04]
+
+
+@contextmanager
+def quiet_backtest_logs():
+    """Suppress expected per-combination risk warnings and restore logger state."""
+    logger = logging.getLogger("backtest")
+    previous_level = logger.level
+    logger.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        logger.setLevel(previous_level)
 
 
 def _parse_positive_list(value: str, converter, label: str) -> List[Number]:
@@ -258,23 +272,24 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
         f"validation: {len(validation)} rows ({validation.index[0]} to {validation.index[-1]})"
     )
 
-    training_results = evaluate_grid(
-        train,
-        args.roc_periods,
-        args.momentum_periods,
-        args.thresholds,
-        args.capital,
-        breaker_enabled,
-        args.coin.upper(),
-    )
-    ranked = rank_results(training_results)
-    validation_metrics = validate_winner(
-        validation,
-        ranked,
-        args.capital,
-        breaker_enabled,
-        args.coin.upper(),
-    )
+    with quiet_backtest_logs():
+        training_results = evaluate_grid(
+            train,
+            args.roc_periods,
+            args.momentum_periods,
+            args.thresholds,
+            args.capital,
+            breaker_enabled,
+            args.coin.upper(),
+        )
+        ranked = rank_results(training_results)
+        validation_metrics = validate_winner(
+            validation,
+            ranked,
+            args.capital,
+            breaker_enabled,
+            args.coin.upper(),
+        )
     written = write_results(ranked, validation_metrics, args.output)
     winner = written.iloc[0]
     print(
