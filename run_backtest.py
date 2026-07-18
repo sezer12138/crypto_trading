@@ -148,6 +148,12 @@ Examples:
     )
 
     parser.add_argument(
+        "--disable-drawdown-breaker",
+        action="store_true",
+        help="Disable forced liquidation and trading halt at the maximum drawdown threshold",
+    )
+
+    parser.add_argument(
         "--source",
         type=str,
         default=None,
@@ -166,6 +172,7 @@ def run_single_backtest(
     capital: float,
     fetcher: HistoricalDataFetcher,
     generate_html: bool = True,
+    drawdown_breaker_enabled: bool = True,
 ) -> Tuple[Optional[BacktestResult], Optional[pd.DataFrame]]:
     """
     Run a single backtest
@@ -178,6 +185,7 @@ def run_single_backtest(
         capital: Initial capital
         fetcher: Data fetcher instance
         generate_html: Whether to generate HTML report
+        drawdown_breaker_enabled: Whether to force liquidation and halt trading at max drawdown
 
     Returns:
         (BacktestResult, DataFrame) tuple, or (None, None) on failure
@@ -244,7 +252,10 @@ def run_single_backtest(
         strategy = get_strategy(strategy_name)
 
     # 3. Run backtest
-    engine = BacktestEngine(initial_capital=capital)
+    engine = BacktestEngine(
+        initial_capital=capital,
+        drawdown_breaker_enabled=drawdown_breaker_enabled,
+    )
     result = engine.run_backtest(df, strategy, coin=coin.upper())
 
     # 4. Save logs
@@ -290,6 +301,7 @@ def compare_strategies(
     capital: float,
     save_report: bool = True,
     data_source: str = None,
+    drawdown_breaker_enabled: bool = True,
 ) -> Dict[str, BacktestResult]:
     """
     Compare performance of multiple strategies
@@ -303,6 +315,7 @@ def compare_strategies(
         capital: Initial capital
         save_report: Whether to save visualization report
         data_source: Data source ("binance" or "okx")
+        drawdown_breaker_enabled: Whether to force liquidation and halt trading at max drawdown
 
     Returns:
         Dict mapping strategy name to BacktestResult
@@ -343,7 +356,15 @@ def compare_strategies(
 
     # Run backtest for each strategy
     for strategy_name in strategies:
-        result, df = run_single_backtest(coin, strategy_name, days, interval, capital, fetcher)
+        result, df = run_single_backtest(
+            coin,
+            strategy_name,
+            days,
+            interval,
+            capital,
+            fetcher,
+            drawdown_breaker_enabled=drawdown_breaker_enabled,
+        )
 
         if result:
             results[strategy_name] = result
@@ -444,6 +465,7 @@ def print_comparison_table(results: Dict[str, BacktestResult]) -> None:
 def main() -> None:
     """Main entry point"""
     args = parse_arguments()
+    drawdown_breaker_enabled = not args.disable_drawdown_breaker
 
     # Ensure directories exist
     Path("data/historical").mkdir(parents=True, exist_ok=True)
@@ -453,7 +475,12 @@ def main() -> None:
     if args.compare:
         # Strategy comparison mode
         compare_strategies(
-            args.coin, args.days, args.interval, args.capital, data_source=args.source
+            args.coin,
+            args.days,
+            args.interval,
+            args.capital,
+            data_source=args.source,
+            drawdown_breaker_enabled=drawdown_breaker_enabled,
         )
 
     elif args.coin == "all":
@@ -469,6 +496,7 @@ def main() -> None:
                 args.interval,
                 args.capital,
                 fetcher,
+                drawdown_breaker_enabled=drawdown_breaker_enabled,
             )
 
             if result and not args.no_viz:
@@ -486,6 +514,7 @@ def main() -> None:
             args.interval,
             args.capital,
             fetcher,
+            drawdown_breaker_enabled=drawdown_breaker_enabled,
         )
 
         if result and not args.no_viz:
