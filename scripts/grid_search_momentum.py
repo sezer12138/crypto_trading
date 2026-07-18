@@ -1,13 +1,29 @@
 #!/usr/bin/env python3
 """Grid-search utilities for Momentum strategy hyperparameters."""
 
+import sys
+from itertools import product
 from pathlib import Path
-from typing import List, Tuple, TypeVar
+from typing import Dict, List, Sequence, Tuple, TypeVar
 
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from backtest import BacktestEngine
+from strategies.momentum import MomentumStrategy
+
 REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
 Number = TypeVar("Number", int, float)
+METRIC_NAMES = (
+    "total_return_pct",
+    "annual_return_pct",
+    "sharpe_ratio",
+    "max_drawdown_pct",
+    "win_rate_pct",
+    "total_trades",
+)
 
 
 def _parse_positive_list(value: str, converter, label: str) -> List[Number]:
@@ -77,3 +93,82 @@ def chronological_split(
     if len(train) <= max_lookback or len(validation) <= max_lookback:
         raise ValueError("Train and validation partitions must exceed the maximum lookback")
     return train, validation
+
+
+def _prefixed_metrics(metrics: Dict[str, float], prefix: str) -> Dict[str, float]:
+    """Select standard backtest metrics and prefix their names."""
+    return {f"{prefix}_{name}": metrics.get(name, 0.0) for name in METRIC_NAMES}
+
+
+def evaluate_grid(
+    train_df: pd.DataFrame,
+    roc_periods: Sequence[int],
+    momentum_periods: Sequence[int],
+    thresholds: Sequence[float],
+    capital: float,
+    drawdown_breaker_enabled: bool,
+    coin: str,
+) -> pd.DataFrame:
+    """Backtest every Momentum parameter combination on training data."""
+    rows = []
+    for roc_period, momentum_period, threshold in product(
+        roc_periods, momentum_periods, thresholds
+    ):
+        strategy = MomentumStrategy(
+            roc_period=roc_period,
+            momentum_period=momentum_period,
+            threshold=threshold,
+        )
+        engine = BacktestEngine(
+            initial_capital=capital,
+            drawdown_breaker_enabled=drawdown_breaker_enabled,
+        )
+        result = engine.run_backtest(train_df, strategy, coin=coin)
+        row = {
+            "roc_period": roc_period,
+            "momentum_period": momentum_period,
+            "threshold": threshold,
+        }
+        row.update(_prefixed_metrics(result.metrics, "train"))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def rank_results(results: pd.DataFrame) -> pd.DataFrame:
+    """Rank training results by return and deterministic tie breakers."""
+    ranked = results.sort_values(
+        by=[
+            "train_total_return_pct",
+            "train_sharpe_ratio",
+            "train_max_drawdown_pct",
+            "roc_period",
+            "momentum_period",
+            "threshold",
+        ],
+        ascending=[False, False, False, True, True, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    ranked.insert(0, "rank", range(1, len(ranked) + 1))
+    return ranked
+
+
+def validate_winner(
+    validation_df: pd.DataFrame,
+    ranked_results: pd.DataFrame,
+    capital: float,
+    drawdown_breaker_enabled: bool,
+    coin: str,
+) -> Dict[str, float]:
+    """Evaluate only the highest-ranked training setting on validation data."""
+    winner = ranked_results.iloc[0]
+    strategy = MomentumStrategy(
+        roc_period=int(winner["roc_period"]),
+        momentum_period=int(winner["momentum_period"]),
+        threshold=float(winner["threshold"]),
+    )
+    engine = BacktestEngine(
+        initial_capital=capital,
+        drawdown_breaker_enabled=drawdown_breaker_enabled,
+    )
+    result = engine.run_backtest(validation_df, strategy, coin=coin)
+    return _prefixed_metrics(result.metrics, "validation")
