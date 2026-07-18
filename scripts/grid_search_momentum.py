@@ -2,12 +2,14 @@
 """Grid-search utilities for Momentum strategy hyperparameters."""
 
 import argparse
+import math
 import sys
 from itertools import product
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, TypeVar
 
 import pandas as pd
+import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -40,7 +42,7 @@ def _parse_positive_list(value: str, converter, label: str) -> List[Number]:
     try:
         for item in raw_items:
             number = converter(item.strip())
-            if number <= 0:
+            if number <= 0 or not math.isfinite(number):
                 raise ValueError
             if number not in parsed:
                 parsed.append(number)
@@ -81,6 +83,8 @@ def load_ohlcv(path: Path) -> pd.DataFrame:
             data[column] = pd.to_numeric(data[column], errors="raise")
     except (TypeError, ValueError) as exc:
         raise ValueError("OHLCV columns must contain numeric values") from exc
+    if not np.isfinite(data.loc[:, list(REQUIRED_COLUMNS)].to_numpy(dtype=float)).all():
+        raise ValueError("OHLCV columns must contain finite numeric values")
 
     return data.set_index("timestamp").loc[:, list(REQUIRED_COLUMNS)].sort_index()
 
@@ -240,7 +244,7 @@ def write_results(
 
 def run_search(args: argparse.Namespace) -> pd.DataFrame:
     """Run training grid search, winner validation, and CSV output."""
-    if args.capital <= 0:
+    if args.capital <= 0 or not math.isfinite(args.capital):
         raise ValueError("Initial capital must be positive")
     data = load_ohlcv(args.data)
     max_lookback = max(max(args.roc_periods), max(args.momentum_periods))

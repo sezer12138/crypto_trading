@@ -45,7 +45,10 @@ def test_parse_int_list_rejects_invalid_values(value):
         parse_int_list(value)
 
 
-@pytest.mark.parametrize("value", ["", "0.01,,0.02", "0,0.02", "-0.01,0.02"])
+@pytest.mark.parametrize(
+    "value",
+    ["", "0.01,,0.02", "0,0.02", "-0.01,0.02", "nan,0.02", "inf,0.02"],
+)
 def test_parse_float_list_rejects_invalid_values(value):
     with pytest.raises(ValueError):
         parse_float_list(value)
@@ -116,6 +119,15 @@ def test_load_ohlcv_rejects_invalid_values(tmp_path, column, value, error):
     path = tmp_path / "prices.csv"
     data.to_csv(path, index=False)
     with pytest.raises(ValueError, match=error):
+        load_ohlcv(path)
+
+
+def test_load_ohlcv_rejects_non_finite_values(tmp_path):
+    data = _ohlcv_frame()
+    data.loc[data.index[0], "close"] = float("nan")
+    path = tmp_path / "prices.csv"
+    _write_csv(path, data)
+    with pytest.raises(ValueError, match="finite"):
         load_ohlcv(path)
 
 
@@ -374,3 +386,22 @@ def test_main_reports_invalid_input(tmp_path, capsys):
 
     assert exit_code == 1
     assert "Error:" in capsys.readouterr().err
+
+
+def test_main_rejects_non_finite_capital(tmp_path, capsys):
+    input_path = tmp_path / "prices.csv"
+    _write_csv(input_path, _ohlcv_frame(120))
+
+    exit_code = main(
+        [
+            "--data",
+            str(input_path),
+            "--capital",
+            "nan",
+            "--output",
+            str(tmp_path / "out.csv"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "capital" in capsys.readouterr().err.lower()
