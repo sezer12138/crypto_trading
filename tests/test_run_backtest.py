@@ -56,3 +56,48 @@ def test_main_propagates_disabled_breaker_to_single_run(monkeypatch):
     run_backtest.main()
 
     assert captured["drawdown_breaker_enabled"] is False
+
+
+def test_main_propagates_disabled_breaker_to_all_coin_runs(monkeypatch):
+    captured = []
+
+    def fake_run_single(*args, **kwargs):
+        captured.append((args, kwargs))
+        return None, None
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_backtest.py", "--coin", "all", "--no-viz", "--disable-drawdown-breaker"],
+    )
+    monkeypatch.setattr(run_backtest, "HistoricalDataFetcher", lambda **kwargs: object())
+    monkeypatch.setattr(run_backtest, "run_single_backtest", fake_run_single)
+
+    run_backtest.main()
+
+    assert [args[0] for args, _ in captured] == ["btc", "eth", "sol"]
+    assert all(kwargs["drawdown_breaker_enabled"] is False for _, kwargs in captured)
+
+
+def test_comparison_forwards_disabled_breaker_to_every_single_run(monkeypatch):
+    captured = []
+
+    def fake_run_single(*args, **kwargs):
+        captured.append((args, kwargs))
+        return None, None
+
+    monkeypatch.setattr(run_backtest, "HistoricalDataFetcher", lambda **kwargs: object())
+    monkeypatch.setattr(run_backtest, "run_single_backtest", fake_run_single)
+
+    results = run_backtest.compare_strategies(
+        "btc",
+        30,
+        "1h",
+        10000.0,
+        save_report=False,
+        drawdown_breaker_enabled=False,
+    )
+
+    assert results == {}
+    assert len(captured) == 13
+    assert all(kwargs["drawdown_breaker_enabled"] is False for _, kwargs in captured)

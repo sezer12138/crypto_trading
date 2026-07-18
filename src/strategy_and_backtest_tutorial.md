@@ -801,6 +801,7 @@ python run_backtest.py --source okx --coin btc --strategy ma_cross --no-viz
 | `--capital` | `10000` | Initial capital in USD |
 | `--compare` | off | Compare all strategies |
 | `--no-viz` | off | Skip visualization charts |
+| `--disable-drawdown-breaker` | off | Disable maximum-drawdown forced liquidation and trading halt |
 | `--source` | `binance` | Data source: binance or okx |
 
 ### Python API Usage
@@ -863,7 +864,8 @@ The `BacktestEngine` in `src/backtest.py` processes each bar in sequence. Here i
 ```
 For each bar i in the data:
   1. DAY TRACKING: Reset daily trade count on new day
-  2. DRAWDOWN CHECK: If drawdown >= max_drawdown_pct, stop all trading
+  2. DRAWDOWN CHECK: If drawdown_breaker_enabled and drawdown >= max_drawdown_pct,
+     force-liquidate and stop trading
   3. STOP-LOSS CHECK: If position loss >= stop_loss_pct, force sell
   4. SIGNAL CHECK:
      - If signal==1 and no position and trades_today < max_trades_per_day --> BUY

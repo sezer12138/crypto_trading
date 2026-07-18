@@ -10,11 +10,13 @@ Tests cover:
     - Reset method for risk management state
 """
 
-import pytest
-import pandas as pd
-import numpy as np
+import logging
 from pathlib import Path
 import sys
+
+import numpy as np
+import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -218,6 +220,24 @@ class TestStopLoss:
 class TestDrawdownCircuitBreaker:
     """Tests for the max drawdown circuit breaker."""
 
+    def test_explicitly_enabled_breaker_forces_liquidation(self):
+        prices = [100.0, 120.0, 90.0, 95.0, 100.0]
+        signals = [SIGNAL_BUY, 0, 0, SIGNAL_BUY, SIGNAL_SELL]
+        df = _make_df(prices, freq="D", signals=signals)
+        engine = BacktestEngine(
+            initial_capital=10000,
+            drawdown_breaker_enabled=True,
+            max_drawdown_pct=0.20,
+            stop_loss_pct=1.0,
+            min_holding_bars=0,
+        )
+
+        result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
+
+        assert result.trades[1].timestamp == df.index[2]
+        assert result.trades[1].strategy_signal == -2
+        assert engine._stopped is True
+
     def test_disabled_circuit_breaker_does_not_force_liquidation(self):
         prices = [100.0, 120.0, 90.0, 95.0, 100.0]
         signals = [SIGNAL_BUY, 0, 0, 0, SIGNAL_SELL]
@@ -250,6 +270,37 @@ class TestDrawdownCircuitBreaker:
         result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
 
         assert result.trades[1].strategy_signal == -2
+
+    def test_disabled_breaker_configuration_survives_reset_and_reuse(self):
+        prices = [100.0, 120.0, 90.0, 95.0, 100.0]
+        signals = [SIGNAL_BUY, 0, 0, 0, SIGNAL_SELL]
+        df = _make_df(prices, freq="D", signals=signals)
+        engine = BacktestEngine(
+            initial_capital=10000,
+            drawdown_breaker_enabled=False,
+            max_drawdown_pct=0.20,
+            stop_loss_pct=1.0,
+            min_holding_bars=0,
+        )
+
+        first_result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
+        engine.reset()
+        second_result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
+
+        assert engine.drawdown_breaker_enabled is False
+        assert first_result.trades[1].timestamp == df.index[4]
+        assert second_result.trades[1].timestamp == df.index[4]
+        assert first_result.metrics == second_result.metrics
+
+    def test_disabled_breaker_does_not_log_cooldown(self, caplog):
+        caplog.set_level(logging.INFO, logger="backtest")
+
+        BacktestEngine(
+            drawdown_breaker_enabled=False,
+            breaker_cooldown_bars=10,
+        )
+
+        assert "Breaker cooldown" not in caplog.text
 
     def test_circuit_breaker_stops_trading(self):
         """When drawdown exceeds max_drawdown_pct, all further trading should stop."""
@@ -426,6 +477,27 @@ class TestDefaultParameters:
 
     def test_drawdown_breaker_enabled_by_default(self):
         engine = BacktestEngine()
+        assert engine.drawdown_breaker_enabled is True
+
+    def test_legacy_positional_breaker_cooldown_argument_is_preserved(self):
+        engine = BacktestEngine(
+            10000.0,
+            0.001,
+            0.001,
+            0.95,
+            5,
+            6,
+            0.05,
+            0.20,
+            False,
+            False,
+            2.0,
+            3,
+            24,
+            10,
+        )
+
+        assert engine.breaker_cooldown_bars == 10
         assert engine.drawdown_breaker_enabled is True
 
 

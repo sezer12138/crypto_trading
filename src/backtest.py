@@ -338,8 +338,8 @@ class BacktestEngine:
         atr_stop_loss_multiplier: float = DEFAULT_ATR_STOP_LOSS_MULTIPLIER,
         max_consecutive_losses: int = DEFAULT_MAX_CONSECUTIVE_LOSSES,
         consecutive_loss_cooldown: int = DEFAULT_CONSECUTIVE_LOSS_COOLDOWN,
-        drawdown_breaker_enabled: bool = True,
         breaker_cooldown_bars: int = 0,
+        drawdown_breaker_enabled: bool = True,
     ):
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
@@ -354,8 +354,8 @@ class BacktestEngine:
         self.atr_stop_loss_multiplier = atr_stop_loss_multiplier
         self.max_consecutive_losses = max_consecutive_losses
         self.consecutive_loss_cooldown = consecutive_loss_cooldown
-        self.drawdown_breaker_enabled = drawdown_breaker_enabled
         self.breaker_cooldown_bars = breaker_cooldown_bars
+        self.drawdown_breaker_enabled = drawdown_breaker_enabled
 
         self.cash = initial_capital
         self.position = 0.0
@@ -385,7 +385,7 @@ class BacktestEngine:
             logger.info(f"   Max drawdown: {max_drawdown_pct * 100:.1f}%")
         if use_atr_stop_loss:
             logger.info(f"   ATR stop-loss multiplier: {atr_stop_loss_multiplier}")
-        if breaker_cooldown_bars > 0:
+        if drawdown_breaker_enabled and breaker_cooldown_bars > 0:
             logger.info(f"   Breaker cooldown: {breaker_cooldown_bars} bars")
 
     def run_backtest(self, df: pd.DataFrame, strategy: object, coin: str = "BTC") -> BacktestResult:
