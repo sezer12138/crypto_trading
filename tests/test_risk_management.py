@@ -218,6 +218,39 @@ class TestStopLoss:
 class TestDrawdownCircuitBreaker:
     """Tests for the max drawdown circuit breaker."""
 
+    def test_disabled_circuit_breaker_does_not_force_liquidation(self):
+        prices = [100.0, 120.0, 90.0, 95.0, 100.0]
+        signals = [SIGNAL_BUY, 0, 0, 0, SIGNAL_SELL]
+        df = _make_df(prices, freq="D", signals=signals)
+        engine = BacktestEngine(
+            initial_capital=10000,
+            drawdown_breaker_enabled=False,
+            max_drawdown_pct=0.20,
+            stop_loss_pct=1.0,
+            min_holding_bars=0,
+        )
+
+        result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
+
+        assert result.trades[1].timestamp == df.index[4]
+        assert result.trades[1].strategy_signal == SIGNAL_SELL
+        assert result.metrics["max_drawdown_pct"] < -20.0
+
+    def test_disabled_breaker_keeps_stop_loss_active(self):
+        df = _make_df(
+            [100.0, 90.0, 90.0],
+            signals=[SIGNAL_BUY, 0, 0],
+        )
+        engine = BacktestEngine(
+            drawdown_breaker_enabled=False,
+            stop_loss_pct=0.05,
+            min_holding_bars=0,
+        )
+
+        result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
+
+        assert result.trades[1].strategy_signal == -2
+
     def test_circuit_breaker_stops_trading(self):
         """When drawdown exceeds max_drawdown_pct, all further trading should stop."""
         # Start at 100, rise to 120 (peak), then crash to 90
@@ -390,6 +423,10 @@ class TestDefaultParameters:
     def test_default_max_drawdown_pct(self):
         engine = BacktestEngine()
         assert engine.max_drawdown_pct == 0.20
+
+    def test_drawdown_breaker_enabled_by_default(self):
+        engine = BacktestEngine()
+        assert engine.drawdown_breaker_enabled is True
 
 
 if __name__ == "__main__":

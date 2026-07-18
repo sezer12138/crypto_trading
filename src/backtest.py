@@ -296,6 +296,7 @@ class BacktestEngine:
         max_trades_per_day: Maximum number of trades per day (default 6)
         stop_loss_pct: Per-trade stop-loss percentage (default 0.05 = 5%)
         max_drawdown_pct: Max drawdown circuit breaker percentage (default 0.20 = 20%)
+        drawdown_breaker_enabled: Whether to enable the drawdown circuit breaker (default True)
         log_decisions: When True, append a per-bar decision row to ``BacktestResult.decision_log``
             (default False — skipped to avoid ~N dict allocations on long backtests).
 
@@ -308,6 +309,7 @@ class BacktestEngine:
         max_trades_per_day: Maximum trades allowed per day
         stop_loss_pct: Per-trade stop-loss threshold
         max_drawdown_pct: Drawdown circuit breaker threshold
+        drawdown_breaker_enabled: Whether the drawdown circuit breaker is enabled
         cash: Current cash
         position: Current position quantity
         position_value: Current position value
@@ -336,6 +338,7 @@ class BacktestEngine:
         atr_stop_loss_multiplier: float = DEFAULT_ATR_STOP_LOSS_MULTIPLIER,
         max_consecutive_losses: int = DEFAULT_MAX_CONSECUTIVE_LOSSES,
         consecutive_loss_cooldown: int = DEFAULT_CONSECUTIVE_LOSS_COOLDOWN,
+        drawdown_breaker_enabled: bool = True,
         breaker_cooldown_bars: int = 0,
     ):
         self.initial_capital = initial_capital
@@ -351,6 +354,7 @@ class BacktestEngine:
         self.atr_stop_loss_multiplier = atr_stop_loss_multiplier
         self.max_consecutive_losses = max_consecutive_losses
         self.consecutive_loss_cooldown = consecutive_loss_cooldown
+        self.drawdown_breaker_enabled = drawdown_breaker_enabled
         self.breaker_cooldown_bars = breaker_cooldown_bars
 
         self.cash = initial_capital
@@ -374,7 +378,11 @@ class BacktestEngine:
         logger.info(f"   Min holding bars: {min_holding_bars}")
         logger.info(f"   Max trades per day: {max_trades_per_day}")
         logger.info(f"   Stop-loss: {stop_loss_pct * 100:.1f}%")
-        logger.info(f"   Max drawdown: {max_drawdown_pct * 100:.1f}%")
+        logger.info(
+            f"   Drawdown breaker: {'enabled' if drawdown_breaker_enabled else 'disabled'}"
+        )
+        if drawdown_breaker_enabled:
+            logger.info(f"   Max drawdown: {max_drawdown_pct * 100:.1f}%")
         if use_atr_stop_loss:
             logger.info(f"   ATR stop-loss multiplier: {atr_stop_loss_multiplier}")
         if breaker_cooldown_bars > 0:
@@ -458,7 +466,7 @@ class BacktestEngine:
                 if self._peak_equity > 0
                 else 0
             )
-            if drawdown >= self.max_drawdown_pct:
+            if self.drawdown_breaker_enabled and drawdown >= self.max_drawdown_pct:
                 if self.position > 0:
                     self._execute_sell(
                         timestamp, price, coin, result, FORCED_SELL_SIGNAL, force=True
