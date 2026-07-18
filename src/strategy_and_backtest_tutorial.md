@@ -282,6 +282,33 @@ df.loc[
 ] = 1
 ```
 
+#### Momentum Hyperparameter Grid Search
+
+Use the standalone grid-search script to compare Momentum lookbacks and ROC thresholds:
+
+```bash
+python scripts/grid_search_momentum.py \
+  --data data/historical/btc_1h_730d.csv \
+  --roc-periods 5,10,15,20,30 \
+  --momentum-periods 5,10,14,20,30 \
+  --thresholds 0.005,0.01,0.015,0.02,0.03,0.04 \
+  --train-ratio 0.7 \
+  --output results/momentum_grid_search.csv
+```
+
+The search ranks all 150 combinations by total return on the first 70% of candles. Ties are
+resolved by Sharpe ratio, maximum drawdown, and then ascending parameter values. Only the
+winning training configuration is evaluated on the final 30% of candles, which remain
+chronologically later and untouched during selection.
+
+The CSV contains every ranked training result and places validation metrics only on the winning
+row. Treat validation return—not the optimized training return—as the more useful estimate for
+future behavior. A single holdout period still does not guarantee that parameters will work in
+other market regimes; walk-forward testing is the appropriate next step before deployment.
+
+The drawdown circuit breaker remains enabled by default. Add `--disable-drawdown-breaker` only
+when intentionally comparing results without that portfolio-level risk control.
+
 ---
 
 ### 5. ATR Stop-Loss (`atr_stop`)

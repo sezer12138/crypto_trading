@@ -9,10 +9,13 @@ from scripts.grid_search_momentum import (
     chronological_split,
     evaluate_grid,
     load_ohlcv,
+    main,
+    parse_arguments,
     parse_float_list,
     parse_int_list,
     rank_results,
     validate_winner,
+    write_results,
 )
 
 
@@ -103,9 +106,12 @@ def test_load_ohlcv_rejects_duplicate_timestamps(tmp_path):
         load_ohlcv(path)
 
 
-@pytest.mark.parametrize("column,value,error", [("timestamp", "bad", "timestamp"), ("close", "bad", "numeric")])
+@pytest.mark.parametrize(
+    "column,value,error", [("timestamp", "bad", "timestamp"), ("close", "bad", "numeric")]
+)
 def test_load_ohlcv_rejects_invalid_values(tmp_path, column, value, error):
     data = _ohlcv_frame().rename_axis("timestamp").reset_index()
+    data[column] = data[column].astype(object)
     data.loc[0, column] = value
     path = tmp_path / "prices.csv"
     data.to_csv(path, index=False)
@@ -170,10 +176,38 @@ def test_evaluate_grid_runs_every_combination_with_fresh_engine(monkeypatch):
 def test_rank_results_uses_deterministic_total_return_order():
     results = pd.DataFrame(
         [
-            {"roc_period": 10, "momentum_period": 14, "threshold": 0.02, "train_total_return_pct": 20, "train_sharpe_ratio": 1, "train_max_drawdown_pct": -20},
-            {"roc_period": 5, "momentum_period": 14, "threshold": 0.02, "train_total_return_pct": 20, "train_sharpe_ratio": 1, "train_max_drawdown_pct": -10},
-            {"roc_period": 5, "momentum_period": 10, "threshold": 0.01, "train_total_return_pct": 20, "train_sharpe_ratio": 2, "train_max_drawdown_pct": -20},
-            {"roc_period": 5, "momentum_period": 10, "threshold": 0.02, "train_total_return_pct": 10, "train_sharpe_ratio": 5, "train_max_drawdown_pct": -5},
+            {
+                "roc_period": 10,
+                "momentum_period": 14,
+                "threshold": 0.02,
+                "train_total_return_pct": 20,
+                "train_sharpe_ratio": 1,
+                "train_max_drawdown_pct": -20,
+            },
+            {
+                "roc_period": 5,
+                "momentum_period": 14,
+                "threshold": 0.02,
+                "train_total_return_pct": 20,
+                "train_sharpe_ratio": 1,
+                "train_max_drawdown_pct": -10,
+            },
+            {
+                "roc_period": 5,
+                "momentum_period": 10,
+                "threshold": 0.01,
+                "train_total_return_pct": 20,
+                "train_sharpe_ratio": 2,
+                "train_max_drawdown_pct": -20,
+            },
+            {
+                "roc_period": 5,
+                "momentum_period": 10,
+                "threshold": 0.02,
+                "train_total_return_pct": 10,
+                "train_sharpe_ratio": 5,
+                "train_max_drawdown_pct": -5,
+            },
         ]
     )
 
@@ -224,3 +258,119 @@ def test_validate_winner_runs_only_best_setting(monkeypatch):
         "validation_win_rate_pct",
         "validation_total_trades",
     }
+
+
+def test_parse_arguments_has_expected_defaults():
+    args = parse_arguments([])
+
+    assert args.roc_periods == [5, 10, 15, 20, 30]
+    assert args.momentum_periods == [5, 10, 14, 20, 30]
+    assert args.thresholds == [0.005, 0.01, 0.015, 0.02, 0.03, 0.04]
+    assert args.train_ratio == 0.7
+    assert args.capital == 10000.0
+    assert args.disable_drawdown_breaker is False
+
+
+def test_parse_arguments_accepts_overrides(tmp_path):
+    args = parse_arguments(
+        [
+            "--data",
+            str(tmp_path / "input.csv"),
+            "--roc-periods",
+            "3,6",
+            "--momentum-periods",
+            "4,8",
+            "--thresholds",
+            "0.01,0.03",
+            "--train-ratio",
+            "0.8",
+            "--capital",
+            "5000",
+            "--output",
+            str(tmp_path / "output.csv"),
+            "--coin",
+            "ETH",
+            "--disable-drawdown-breaker",
+        ]
+    )
+
+    assert args.roc_periods == [3, 6]
+    assert args.momentum_periods == [4, 8]
+    assert args.thresholds == [0.01, 0.03]
+    assert args.train_ratio == 0.8
+    assert args.capital == 5000.0
+    assert args.coin == "ETH"
+    assert args.disable_drawdown_breaker is True
+
+
+def test_write_results_populates_validation_only_for_winner(tmp_path):
+    ranked = pd.DataFrame(
+        [
+            {
+                "rank": 1,
+                "roc_period": 5,
+                "momentum_period": 10,
+                "threshold": 0.01,
+                "train_total_return_pct": 20.0,
+            },
+            {
+                "rank": 2,
+                "roc_period": 10,
+                "momentum_period": 14,
+                "threshold": 0.02,
+                "train_total_return_pct": 10.0,
+            },
+        ]
+    )
+    validation = {
+        "validation_total_return_pct": 5.0,
+        "validation_sharpe_ratio": 0.4,
+    }
+    output = tmp_path / "nested" / "results.csv"
+
+    written = write_results(ranked, validation, output)
+    loaded = pd.read_csv(output)
+
+    assert output.exists()
+    assert written["rank"].tolist() == [1, 2]
+    assert loaded.loc[0, "validation_total_return_pct"] == 5.0
+    assert pd.isna(loaded.loc[1, "validation_total_return_pct"])
+    assert "validation_sharpe_ratio" in loaded.columns
+
+
+def test_main_runs_one_combination_end_to_end(tmp_path, capsys):
+    input_path = tmp_path / "prices.csv"
+    output_path = tmp_path / "results.csv"
+    _write_csv(input_path, _ohlcv_frame(120))
+
+    exit_code = main(
+        [
+            "--data",
+            str(input_path),
+            "--roc-periods",
+            "5",
+            "--momentum-periods",
+            "7",
+            "--thresholds",
+            "0.01",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert len(pd.read_csv(output_path)) == 1
+    assert "Winning parameters" in captured.out
+    assert "Training total return" in captured.out
+    assert "Validation total return" in captured.out
+
+
+def test_main_reports_invalid_input(tmp_path, capsys):
+    input_path = tmp_path / "bad.csv"
+    pd.DataFrame({"timestamp": ["2024-01-01"], "close": [100]}).to_csv(input_path, index=False)
+
+    exit_code = main(["--data", str(input_path), "--output", str(tmp_path / "out.csv")])
+
+    assert exit_code == 1
+    assert "Error:" in capsys.readouterr().err

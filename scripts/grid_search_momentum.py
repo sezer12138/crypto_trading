@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Grid-search utilities for Momentum strategy hyperparameters."""
 
+import argparse
 import sys
 from itertools import product
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple, TypeVar
+from typing import Dict, List, Optional, Sequence, Tuple, TypeVar
 
 import pandas as pd
 
@@ -24,6 +25,9 @@ METRIC_NAMES = (
     "win_rate_pct",
     "total_trades",
 )
+DEFAULT_ROC_PERIODS = [5, 10, 15, 20, 30]
+DEFAULT_MOMENTUM_PERIODS = [5, 10, 14, 20, 30]
+DEFAULT_THRESHOLDS = [0.005, 0.01, 0.015, 0.02, 0.03, 0.04]
 
 
 def _parse_positive_list(value: str, converter, label: str) -> List[Number]:
@@ -172,3 +176,125 @@ def validate_winner(
     )
     result = engine.run_backtest(validation_df, strategy, coin=coin)
     return _prefixed_metrics(result.metrics, "validation")
+
+
+def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Parse Momentum grid-search command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Find Momentum strategy parameters using chronological validation"
+    )
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=Path("data/historical/btc_1h_730d.csv"),
+        help="Timestamp-indexed OHLCV CSV file",
+    )
+    parser.add_argument(
+        "--roc-periods",
+        type=parse_int_list,
+        default=DEFAULT_ROC_PERIODS.copy(),
+        help="Comma-separated ROC lookback periods",
+    )
+    parser.add_argument(
+        "--momentum-periods",
+        type=parse_int_list,
+        default=DEFAULT_MOMENTUM_PERIODS.copy(),
+        help="Comma-separated momentum lookback periods",
+    )
+    parser.add_argument(
+        "--thresholds",
+        type=parse_float_list,
+        default=DEFAULT_THRESHOLDS.copy(),
+        help="Comma-separated positive ROC thresholds",
+    )
+    parser.add_argument("--train-ratio", type=float, default=0.7)
+    parser.add_argument("--capital", type=float, default=10000.0)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("results/momentum_grid_search.csv"),
+    )
+    parser.add_argument("--coin", default="BTC")
+    parser.add_argument(
+        "--disable-drawdown-breaker",
+        action="store_true",
+        help="Disable forced liquidation and halt at the maximum drawdown threshold",
+    )
+    return parser.parse_args(argv)
+
+
+def write_results(
+    ranked_results: pd.DataFrame,
+    validation_metrics: Dict[str, float],
+    output: Path,
+) -> pd.DataFrame:
+    """Attach winner validation metrics and write ranked results to CSV."""
+    written = ranked_results.copy()
+    for name, value in validation_metrics.items():
+        written[name] = float("nan")
+        written.loc[written.index[0], name] = value
+    output.parent.mkdir(parents=True, exist_ok=True)
+    written.to_csv(output, index=False)
+    return written
+
+
+def run_search(args: argparse.Namespace) -> pd.DataFrame:
+    """Run training grid search, winner validation, and CSV output."""
+    if args.capital <= 0:
+        raise ValueError("Initial capital must be positive")
+    data = load_ohlcv(args.data)
+    max_lookback = max(max(args.roc_periods), max(args.momentum_periods))
+    train, validation = chronological_split(data, args.train_ratio, max_lookback)
+    breaker_enabled = not args.disable_drawdown_breaker
+
+    combination_count = len(args.roc_periods) * len(args.momentum_periods) * len(args.thresholds)
+    print(f"Searching {combination_count} parameter combinations")
+    print(
+        f"Training: {len(train)} rows ({train.index[0]} to {train.index[-1]}); "
+        f"validation: {len(validation)} rows ({validation.index[0]} to {validation.index[-1]})"
+    )
+
+    training_results = evaluate_grid(
+        train,
+        args.roc_periods,
+        args.momentum_periods,
+        args.thresholds,
+        args.capital,
+        breaker_enabled,
+        args.coin.upper(),
+    )
+    ranked = rank_results(training_results)
+    validation_metrics = validate_winner(
+        validation,
+        ranked,
+        args.capital,
+        breaker_enabled,
+        args.coin.upper(),
+    )
+    written = write_results(ranked, validation_metrics, args.output)
+    winner = written.iloc[0]
+    print(
+        "Winning parameters: "
+        f"roc_period={int(winner['roc_period'])}, "
+        f"momentum_period={int(winner['momentum_period'])}, "
+        f"threshold={winner['threshold']:.6g}"
+    )
+    print(f"Training total return: {winner['train_total_return_pct']:.2f}%")
+    print(f"Validation total return: {winner['validation_total_return_pct']:.2f}%")
+    print(f"Results written to: {args.output}")
+    return written
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run the Momentum grid-search CLI."""
+    try:
+        args = parse_arguments(argv)
+        run_search(args)
+        return 0
+    except (ValueError, OSError, pd.errors.ParserError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
