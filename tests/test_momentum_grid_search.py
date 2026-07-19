@@ -277,9 +277,10 @@ def test_validate_winner_runs_only_best_setting(monkeypatch):
 def test_parse_arguments_has_expected_defaults():
     args = parse_arguments([])
 
-    assert args.roc_periods == [5, 10, 15, 20, 30]
-    assert args.momentum_periods == [5, 10, 14, 20, 30]
-    assert args.thresholds == [0.005, 0.01, 0.015, 0.02, 0.03, 0.04]
+    assert args.roc_periods == list(range(2, 31, 2))
+    assert args.momentum_periods == list(range(2, 41, 2))
+    assert args.thresholds == [value / 1000 for value in range(5, 81, 5)]
+    assert len(args.roc_periods) * len(args.momentum_periods) * len(args.thresholds) == 4800
     assert args.train_ratio == 0.7
     assert args.capital == 10000.0
     assert args.disable_drawdown_breaker is False

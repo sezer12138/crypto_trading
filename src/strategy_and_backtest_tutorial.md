@@ -289,17 +289,21 @@ Use the standalone grid-search script to compare Momentum lookbacks and ROC thre
 ```bash
 python scripts/grid_search_momentum.py \
   --data data/historical/btc_1h_730d.csv \
-  --roc-periods 5,10,15,20,30 \
-  --momentum-periods 5,10,14,20,30 \
-  --thresholds 0.005,0.01,0.015,0.02,0.03,0.04 \
+  --roc-periods 2,4,6,8,10,12,14,16,18,20,22,24,26,28,30 \
+  --momentum-periods 2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40 \
+  --thresholds 0.005,0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,0.055,0.060,0.065,0.070,0.075,0.080 \
   --train-ratio 0.7 \
   --output results/momentum_grid_search.csv
 ```
 
-The search ranks all 150 combinations by total return on the first 70% of candles. Ties are
+The search ranks all 4,800 combinations by total return on the first 70% of candles. Ties are
 resolved by Sharpe ratio, maximum drawdown, and then ascending parameter values. Only the
 winning training configuration is evaluated on the final 30% of candles, which remain
 chronologically later and untouched during selection.
+
+This broader default grid takes substantially longer than the earlier 150-combination search
+and increases selection-overfitting risk. Use explicit CLI lists for faster experiments, and
+rely on validation or walk-forward results rather than the best training return.
 
 The CSV contains every ranked training result and places validation metrics only on the winning
 row. Treat validation return—not the optimized training return—as the more useful estimate for

@@ -29,9 +29,9 @@ METRIC_NAMES = (
     "win_rate_pct",
     "total_trades",
 )
-DEFAULT_ROC_PERIODS = [5, 10, 15, 20, 30]
-DEFAULT_MOMENTUM_PERIODS = [5, 10, 14, 20, 30]
-DEFAULT_THRESHOLDS = [0.005, 0.01, 0.015, 0.02, 0.03, 0.04]
+DEFAULT_ROC_PERIODS = list(range(2, 31, 2))
+DEFAULT_MOMENTUM_PERIODS = list(range(2, 41, 2))
+DEFAULT_THRESHOLDS = [value / 1000 for value in range(5, 81, 5)]
 
 
 @contextmanager
