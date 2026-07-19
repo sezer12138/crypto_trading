@@ -7,7 +7,7 @@ A trend-following strategy suitable for medium-frequency trading.
 
 Usage example:
     >>> from strategies import get_strategy
-    >>> strategy = get_strategy('momentum', roc_period=5, threshold=0.04)
+    >>> strategy = get_strategy('momentum', roc_period=16, threshold=0.055)
     >>> result_df = strategy.generate_signals(df)
 """
 
@@ -30,9 +30,9 @@ class MomentumStrategy(TradingStrategy):
     - Sell when ROC turns negative and momentum is negative
 
     Args:
-        roc_period: Rate of change calculation period (default 5)
-        momentum_period: Momentum calculation period (default 10)
-        threshold: ROC threshold (default 0.04 = 4%)
+        roc_period: Rate of change calculation period (default 16)
+        momentum_period: Momentum calculation period (default 12)
+        threshold: ROC threshold (default 0.055 = 5.5%)
 
     Generated indicator columns:
         roc: Rate of change (percentage)

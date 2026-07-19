@@ -203,9 +203,9 @@ class TestMomentumStrategy:
 
     def test_optimized_defaults_and_explicit_overrides(self):
         default = get_strategy("momentum")
-        assert default.roc_period == 5
-        assert default.momentum_period == 10
-        assert default.threshold == 0.04
+        assert default.roc_period == 16
+        assert default.momentum_period == 12
+        assert default.threshold == 0.055
 
         explicit = get_strategy("momentum", roc_period=9, momentum_period=12, threshold=0.03)
         assert explicit.roc_period == 9

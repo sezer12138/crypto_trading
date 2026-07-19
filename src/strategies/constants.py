@@ -34,9 +34,9 @@ DEFAULT_MACD_SIGNAL = 9  # MACD signal line period
 # ============================================================
 # Momentum strategy defaults
 # ============================================================
-DEFAULT_MOMENTUM_ROC_PERIOD = 5  # Rate-of-change lookback period
-DEFAULT_MOMENTUM_PERIOD = 10  # Price momentum lookback period
-DEFAULT_MOMENTUM_THRESHOLD = 0.04  # ROC signal threshold (4%)
+DEFAULT_MOMENTUM_ROC_PERIOD = 16  # Rate-of-change lookback period
+DEFAULT_MOMENTUM_PERIOD = 12  # Price momentum lookback period
+DEFAULT_MOMENTUM_THRESHOLD = 0.055  # ROC signal threshold (5.5%)
 
 # ============================================================
 # Multi-factor strategy weights

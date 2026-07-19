@@ -261,9 +261,9 @@ roc < -threshold  AND  momentum_norm < 0  AND  roc[i-1] >= -threshold
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `roc_period` | 5 | ROC lookback period |
-| `momentum_period` | 10 | Momentum lookback period |
-| `threshold` | 0.04 | ROC threshold (4%) to filter noise |
+| `roc_period` | 16 | ROC lookback period |
+| `momentum_period` | 12 | Momentum lookback period |
+| `threshold` | 0.055 | ROC threshold (5.5%) to filter noise |
 
 **Code reference**:
 ```python
@@ -313,9 +313,10 @@ other market regimes; walk-forward testing is the appropriate next step before d
 The drawdown circuit breaker remains enabled by default. Add `--disable-drawdown-breaker` only
 when intentionally comparing results without that portfolio-level risk control.
 
-The built-in defaults use the grid's training winner (`5`, `10`, `0.04`), which returned 37.43%
-on training data but -17.67% on chronological validation data. They are training-optimized
-defaults, not evidence of an out-of-sample improvement.
+The built-in defaults use the expanded grid's rank-one training result (`16`, `12`, `0.055`).
+It returned 121.50% with a 2.14 Sharpe ratio and -16.98% drawdown on training data, but returned
+-18.16% with a -2.02 Sharpe ratio on chronological validation data. These are training-ranked,
+overfit defaults—not evidence of an out-of-sample improvement.
 
 ---
 
