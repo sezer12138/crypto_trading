@@ -201,6 +201,17 @@ class TestMomentumStrategy:
         assert "momentum" in result.columns
         assert "signal" in result.columns
 
+    def test_optimized_defaults_and_explicit_overrides(self):
+        default = get_strategy("momentum")
+        assert default.roc_period == 5
+        assert default.momentum_period == 10
+        assert default.threshold == 0.04
+
+        explicit = get_strategy("momentum", roc_period=9, momentum_period=12, threshold=0.03)
+        assert explicit.roc_period == 9
+        assert explicit.momentum_period == 12
+        assert explicit.threshold == 0.03
+
 
 class TestStochasticStrategy:
     def test_stochastic_generates_signals(self, sample_data):

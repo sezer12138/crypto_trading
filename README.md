@@ -138,7 +138,8 @@ results = fetcher.get_all_coins_historical(
 #### 2.9 动量策略 (MomentumStrategy)
 - **类型：** 中频趋势跟踪
 - **逻辑：** 基于价格变化率(ROC)和动量指标
-- **参数：** roc_period=10, momentum_period=14, threshold=0.02
+- **参数：** roc_period=5, momentum_period=10, threshold=0.04
+- **注意：** 该组默认值是训练集最优参数（训练收益 37.43%），但时间顺序验证集收益为 -17.67%，不代表样本外表现更好
 
 #### 2.10 ATR动态止损策略 (ATRStopLossStrategy)
 - **类型：** 高频趋势跟踪

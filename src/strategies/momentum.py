@@ -7,13 +7,18 @@ A trend-following strategy suitable for medium-frequency trading.
 
 Usage example:
     >>> from strategies import get_strategy
-    >>> strategy = get_strategy('momentum', roc_period=10, threshold=0.02)
+    >>> strategy = get_strategy('momentum', roc_period=5, threshold=0.04)
     >>> result_df = strategy.generate_signals(df)
 """
 
 import pandas as pd
 from strategies._base import TradingStrategy
 from strategies._helpers import forward_fill_position
+from strategies.constants import (
+    DEFAULT_MOMENTUM_PERIOD,
+    DEFAULT_MOMENTUM_ROC_PERIOD,
+    DEFAULT_MOMENTUM_THRESHOLD,
+)
 
 
 class MomentumStrategy(TradingStrategy):
@@ -25,9 +30,9 @@ class MomentumStrategy(TradingStrategy):
     - Sell when ROC turns negative and momentum is negative
 
     Args:
-        roc_period: Rate of change calculation period (default 10)
-        momentum_period: Momentum calculation period (default 14)
-        threshold: ROC threshold (default 0.02 = 2%)
+        roc_period: Rate of change calculation period (default 5)
+        momentum_period: Momentum calculation period (default 10)
+        threshold: ROC threshold (default 0.04 = 4%)
 
     Generated indicator columns:
         roc: Rate of change (percentage)
@@ -35,7 +40,12 @@ class MomentumStrategy(TradingStrategy):
         momentum_norm: Normalized momentum (percentage)
     """
 
-    def __init__(self, roc_period: int = 10, momentum_period: int = 14, threshold: float = 0.02):
+    def __init__(
+        self,
+        roc_period: int = DEFAULT_MOMENTUM_ROC_PERIOD,
+        momentum_period: int = DEFAULT_MOMENTUM_PERIOD,
+        threshold: float = DEFAULT_MOMENTUM_THRESHOLD,
+    ):
         super().__init__("Momentum_Strategy")
         self.roc_period = roc_period
         self.momentum_period = momentum_period
