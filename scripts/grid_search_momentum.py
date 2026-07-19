@@ -18,6 +18,11 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from backtest import BacktestEngine
 from strategies.momentum import MomentumStrategy
+from strategies.constants import (
+    DEFAULT_MOMENTUM_SELL_PERIOD,
+    DEFAULT_MOMENTUM_SELL_ROC_PERIOD,
+    DEFAULT_MOMENTUM_SELL_THRESHOLD,
+)
 
 REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
 Number = TypeVar("Number", int, float)
@@ -32,6 +37,15 @@ METRIC_NAMES = (
 DEFAULT_ROC_PERIODS = list(range(2, 31, 2))
 DEFAULT_MOMENTUM_PERIODS = list(range(2, 41, 2))
 DEFAULT_THRESHOLDS = [value / 1000 for value in range(5, 81, 5)]
+TOP_BUY_CANDIDATES = 5
+PARAMETER_COLUMNS = (
+    "buy_roc_period",
+    "buy_momentum_period",
+    "buy_threshold",
+    "sell_roc_period",
+    "sell_momentum_period",
+    "sell_threshold",
+)
 
 
 @contextmanager
@@ -122,7 +136,26 @@ def _prefixed_metrics(metrics: Dict[str, float], prefix: str) -> Dict[str, float
     return {f"{prefix}_{name}": metrics.get(name, 0.0) for name in METRIC_NAMES}
 
 
-def evaluate_grid(
+def _run_combination(
+    train_df: pd.DataFrame,
+    parameters: Dict[str, float],
+    capital: float,
+    drawdown_breaker_enabled: bool,
+    coin: str,
+) -> Dict[str, float]:
+    """Run one Momentum combination and return parameters plus training metrics."""
+    strategy = MomentumStrategy(**parameters)
+    engine = BacktestEngine(
+        initial_capital=capital,
+        drawdown_breaker_enabled=drawdown_breaker_enabled,
+    )
+    result = engine.run_backtest(train_df, strategy, coin=coin)
+    row = parameters.copy()
+    row.update(_prefixed_metrics(result.metrics, "train"))
+    return row
+
+
+def evaluate_buy_grid(
     train_df: pd.DataFrame,
     roc_periods: Sequence[int],
     momentum_periods: Sequence[int],
@@ -131,28 +164,68 @@ def evaluate_grid(
     drawdown_breaker_enabled: bool,
     coin: str,
 ) -> pd.DataFrame:
-    """Backtest every Momentum parameter combination on training data."""
+    """Backtest every buy combination with fixed default sell parameters."""
     rows = []
     for roc_period, momentum_period, threshold in product(
         roc_periods, momentum_periods, thresholds
     ):
-        strategy = MomentumStrategy(
-            roc_period=roc_period,
-            momentum_period=momentum_period,
-            threshold=threshold,
-        )
-        engine = BacktestEngine(
-            initial_capital=capital,
-            drawdown_breaker_enabled=drawdown_breaker_enabled,
-        )
-        result = engine.run_backtest(train_df, strategy, coin=coin)
-        row = {
-            "roc_period": roc_period,
-            "momentum_period": momentum_period,
-            "threshold": threshold,
+        parameters = {
+            "buy_roc_period": roc_period,
+            "buy_momentum_period": momentum_period,
+            "buy_threshold": threshold,
+            "sell_roc_period": DEFAULT_MOMENTUM_SELL_ROC_PERIOD,
+            "sell_momentum_period": DEFAULT_MOMENTUM_SELL_PERIOD,
+            "sell_threshold": DEFAULT_MOMENTUM_SELL_THRESHOLD,
         }
-        row.update(_prefixed_metrics(result.metrics, "train"))
-        rows.append(row)
+        rows.append(_run_combination(train_df, parameters, capital, drawdown_breaker_enabled, coin))
+    return pd.DataFrame(rows)
+
+
+def select_top_buy_candidates(
+    results: pd.DataFrame, count: int = TOP_BUY_CANDIDATES
+) -> pd.DataFrame:
+    """Return the highest-ranked unique buy triples."""
+    buy_columns = ["buy_roc_period", "buy_momentum_period", "buy_threshold"]
+    ranked = results.sort_values(
+        by=[
+            "train_total_return_pct",
+            "train_sharpe_ratio",
+            "train_max_drawdown_pct",
+            *buy_columns,
+        ],
+        ascending=[False, False, False, True, True, True],
+        kind="mergesort",
+    )
+    return ranked.loc[:, buy_columns].drop_duplicates().head(count).reset_index(drop=True)
+
+
+def evaluate_sell_grid(
+    train_df: pd.DataFrame,
+    buy_candidates: pd.DataFrame,
+    roc_periods: Sequence[int],
+    momentum_periods: Sequence[int],
+    thresholds: Sequence[float],
+    capital: float,
+    drawdown_breaker_enabled: bool,
+    coin: str,
+) -> pd.DataFrame:
+    """Backtest each retained buy triple against every sell combination."""
+    rows = []
+    for buy in buy_candidates.itertuples(index=False):
+        for roc_period, momentum_period, threshold in product(
+            roc_periods, momentum_periods, thresholds
+        ):
+            parameters = {
+                "buy_roc_period": int(buy.buy_roc_period),
+                "buy_momentum_period": int(buy.buy_momentum_period),
+                "buy_threshold": float(buy.buy_threshold),
+                "sell_roc_period": roc_period,
+                "sell_momentum_period": momentum_period,
+                "sell_threshold": threshold,
+            }
+            rows.append(
+                _run_combination(train_df, parameters, capital, drawdown_breaker_enabled, coin)
+            )
     return pd.DataFrame(rows)
 
 
@@ -163,11 +236,9 @@ def rank_results(results: pd.DataFrame) -> pd.DataFrame:
             "train_total_return_pct",
             "train_sharpe_ratio",
             "train_max_drawdown_pct",
-            "roc_period",
-            "momentum_period",
-            "threshold",
+            *PARAMETER_COLUMNS,
         ],
-        ascending=[False, False, False, True, True, True],
+        ascending=[False, False, False, True, True, True, True, True, True],
         kind="mergesort",
     ).reset_index(drop=True)
     ranked.insert(0, "rank", range(1, len(ranked) + 1))
@@ -184,9 +255,12 @@ def validate_winner(
     """Evaluate only the highest-ranked training setting on validation data."""
     winner = ranked_results.iloc[0]
     strategy = MomentumStrategy(
-        roc_period=int(winner["roc_period"]),
-        momentum_period=int(winner["momentum_period"]),
-        threshold=float(winner["threshold"]),
+        buy_roc_period=int(winner["buy_roc_period"]),
+        buy_momentum_period=int(winner["buy_momentum_period"]),
+        buy_threshold=float(winner["buy_threshold"]),
+        sell_roc_period=int(winner["sell_roc_period"]),
+        sell_momentum_period=int(winner["sell_momentum_period"]),
+        sell_threshold=float(winner["sell_threshold"]),
     )
     engine = BacktestEngine(
         initial_capital=capital,
@@ -265,16 +339,32 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
     train, validation = chronological_split(data, args.train_ratio, max_lookback)
     breaker_enabled = not args.disable_drawdown_breaker
 
-    combination_count = len(args.roc_periods) * len(args.momentum_periods) * len(args.thresholds)
-    print(f"Searching {combination_count} parameter combinations")
+    grid_size = len(args.roc_periods) * len(args.momentum_periods) * len(args.thresholds)
+    retained_count = min(TOP_BUY_CANDIDATES, grid_size)
+    evaluation_count = grid_size + retained_count * grid_size
+    print(
+        f"Searching {evaluation_count} parameter combinations "
+        f"({grid_size} buy + {retained_count * grid_size} sell)"
+    )
     print(
         f"Training: {len(train)} rows ({train.index[0]} to {train.index[-1]}); "
         f"validation: {len(validation)} rows ({validation.index[0]} to {validation.index[-1]})"
     )
 
     with quiet_backtest_logs():
-        training_results = evaluate_grid(
+        buy_results = evaluate_buy_grid(
             train,
+            args.roc_periods,
+            args.momentum_periods,
+            args.thresholds,
+            args.capital,
+            breaker_enabled,
+            args.coin.upper(),
+        )
+        buy_candidates = select_top_buy_candidates(buy_results)
+        training_results = evaluate_sell_grid(
+            train,
+            buy_candidates,
             args.roc_periods,
             args.momentum_periods,
             args.thresholds,
@@ -294,9 +384,12 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
     winner = written.iloc[0]
     print(
         "Winning parameters: "
-        f"roc_period={int(winner['roc_period'])}, "
-        f"momentum_period={int(winner['momentum_period'])}, "
-        f"threshold={winner['threshold']:.6g}"
+        f"buy_roc_period={int(winner['buy_roc_period'])}, "
+        f"buy_momentum_period={int(winner['buy_momentum_period'])}, "
+        f"buy_threshold={winner['buy_threshold']:.6g}, "
+        f"sell_roc_period={int(winner['sell_roc_period'])}, "
+        f"sell_momentum_period={int(winner['sell_momentum_period'])}, "
+        f"sell_threshold={winner['sell_threshold']:.6g}"
     )
     print(f"Training total return: {winner['train_total_return_pct']:.2f}%")
     print(f"Validation total return: {winner['validation_total_return_pct']:.2f}%")

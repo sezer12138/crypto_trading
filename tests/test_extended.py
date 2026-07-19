@@ -195,22 +195,62 @@ class TestVWAPStrategy:
 
 class TestMomentumStrategy:
     def test_momentum_generates_signals(self, sample_data):
-        strategy = get_strategy("momentum", roc_period=10, momentum_period=14)
+        strategy = get_strategy(
+            "momentum",
+            buy_roc_period=10,
+            buy_momentum_period=14,
+            sell_roc_period=8,
+            sell_momentum_period=12,
+        )
         result = strategy.generate_signals(sample_data)
-        assert "roc" in result.columns
-        assert "momentum" in result.columns
+        assert "buy_roc" in result.columns
+        assert "buy_momentum" in result.columns
+        assert "sell_roc" in result.columns
+        assert "sell_momentum" in result.columns
         assert "signal" in result.columns
 
     def test_optimized_defaults_and_explicit_overrides(self):
         default = get_strategy("momentum")
-        assert default.roc_period == 16
-        assert default.momentum_period == 12
-        assert default.threshold == 0.055
+        assert default.buy_roc_period == 16
+        assert default.buy_momentum_period == 12
+        assert default.buy_threshold == 0.055
+        assert default.sell_roc_period == 16
+        assert default.sell_momentum_period == 12
+        assert default.sell_threshold == 0.055
 
-        explicit = get_strategy("momentum", roc_period=9, momentum_period=12, threshold=0.03)
-        assert explicit.roc_period == 9
-        assert explicit.momentum_period == 12
-        assert explicit.threshold == 0.03
+        explicit = get_strategy(
+            "momentum",
+            buy_roc_period=9,
+            buy_momentum_period=11,
+            buy_threshold=0.03,
+            sell_roc_period=7,
+            sell_momentum_period=13,
+            sell_threshold=0.04,
+        )
+        assert explicit.buy_roc_period == 9
+        assert explicit.buy_momentum_period == 11
+        assert explicit.buy_threshold == 0.03
+        assert explicit.sell_roc_period == 7
+        assert explicit.sell_momentum_period == 13
+        assert explicit.sell_threshold == 0.04
+
+    def test_buy_and_sell_parameters_drive_independent_signal_timing(self):
+        data = pd.DataFrame({"close": [100, 100, 100, 102, 105, 104, 100, 95]})
+        strategy = get_strategy(
+            "momentum",
+            buy_roc_period=1,
+            buy_momentum_period=1,
+            buy_threshold=0.02,
+            sell_roc_period=2,
+            sell_momentum_period=2,
+            sell_threshold=0.05,
+        )
+
+        result = strategy.generate_signals(data)
+
+        assert result.index[result["signal"] == 1].tolist() == [4]
+        assert result.index[result["signal"] == -1].tolist() == [7]
+        assert result.loc[4, "buy_roc"] != result.loc[4, "sell_roc"]
 
 
 class TestStochasticStrategy:

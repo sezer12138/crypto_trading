@@ -8,7 +8,8 @@ import pytest
 
 from scripts.grid_search_momentum import (
     chronological_split,
-    evaluate_grid,
+    evaluate_buy_grid,
+    evaluate_sell_grid,
     load_ohlcv,
     main,
     parse_arguments,
@@ -16,6 +17,7 @@ from scripts.grid_search_momentum import (
     parse_int_list,
     quiet_backtest_logs,
     rank_results,
+    select_top_buy_candidates,
     validate_winner,
     write_results,
 )
@@ -144,7 +146,7 @@ class _FakeResult:
     }
 
 
-def test_evaluate_grid_runs_every_combination_with_fresh_engine(monkeypatch):
+def test_evaluate_buy_grid_runs_every_combination_with_fixed_sell_defaults(monkeypatch):
     import scripts.grid_search_momentum as search
 
     engines = []
@@ -159,7 +161,7 @@ def test_evaluate_grid_runs_every_combination_with_fresh_engine(monkeypatch):
 
     monkeypatch.setattr(search, "BacktestEngine", FakeEngine)
 
-    results = evaluate_grid(
+    results = evaluate_buy_grid(
         _ohlcv_frame(40),
         roc_periods=[5, 10],
         momentum_periods=[7, 14],
@@ -170,14 +172,20 @@ def test_evaluate_grid_runs_every_combination_with_fresh_engine(monkeypatch):
     )
 
     assert len(results) == 8
-    assert len(results[["roc_period", "momentum_period", "threshold"]].drop_duplicates()) == 8
+    assert (
+        len(results[["buy_roc_period", "buy_momentum_period", "buy_threshold"]].drop_duplicates())
+        == 8
+    )
     assert len(engines) == 8
     assert all(engine.kwargs["initial_capital"] == 12345.0 for engine in engines)
     assert all(engine.kwargs["drawdown_breaker_enabled"] is False for engine in engines)
     assert set(results.columns) == {
-        "roc_period",
-        "momentum_period",
-        "threshold",
+        "buy_roc_period",
+        "buy_momentum_period",
+        "buy_threshold",
+        "sell_roc_period",
+        "sell_momentum_period",
+        "sell_threshold",
         "train_total_return_pct",
         "train_annual_return_pct",
         "train_sharpe_ratio",
@@ -187,37 +195,116 @@ def test_evaluate_grid_runs_every_combination_with_fresh_engine(monkeypatch):
     }
 
 
+def test_select_top_buy_candidates_keeps_five_best_unique_settings():
+    results = pd.DataFrame(
+        [
+            {
+                "buy_roc_period": value,
+                "buy_momentum_period": 2,
+                "buy_threshold": 0.01,
+                "train_total_return_pct": float(value),
+                "train_sharpe_ratio": 0.0,
+                "train_max_drawdown_pct": -10.0,
+            }
+            for value in range(1, 8)
+        ]
+    )
+
+    selected = select_top_buy_candidates(results)
+
+    assert selected["buy_roc_period"].tolist() == [7, 6, 5, 4, 3]
+
+
+def test_evaluate_sell_grid_pairs_each_buy_candidate_with_every_sell_setting(monkeypatch):
+    import scripts.grid_search_momentum as search
+
+    class FakeEngine:
+        def __init__(self, **kwargs):
+            pass
+
+        def run_backtest(self, df, strategy, coin):
+            return _FakeResult()
+
+    monkeypatch.setattr(search, "BacktestEngine", FakeEngine)
+    buy_candidates = pd.DataFrame(
+        [
+            {"buy_roc_period": 3, "buy_momentum_period": 4, "buy_threshold": 0.01},
+            {"buy_roc_period": 5, "buy_momentum_period": 6, "buy_threshold": 0.02},
+        ]
+    )
+
+    results = evaluate_sell_grid(
+        _ohlcv_frame(40),
+        buy_candidates,
+        roc_periods=[7, 9],
+        momentum_periods=[8],
+        thresholds=[0.03, 0.04],
+        capital=10000.0,
+        drawdown_breaker_enabled=True,
+        coin="BTC",
+    )
+
+    assert len(results) == 8
+    assert (
+        len(
+            results[
+                [
+                    "buy_roc_period",
+                    "buy_momentum_period",
+                    "buy_threshold",
+                    "sell_roc_period",
+                    "sell_momentum_period",
+                    "sell_threshold",
+                ]
+            ].drop_duplicates()
+        )
+        == 8
+    )
+
+
 def test_rank_results_uses_deterministic_total_return_order():
     results = pd.DataFrame(
         [
             {
-                "roc_period": 10,
-                "momentum_period": 14,
-                "threshold": 0.02,
+                "buy_roc_period": 10,
+                "buy_momentum_period": 14,
+                "buy_threshold": 0.02,
+                "sell_roc_period": 8,
+                "sell_momentum_period": 12,
+                "sell_threshold": 0.03,
                 "train_total_return_pct": 20,
                 "train_sharpe_ratio": 1,
                 "train_max_drawdown_pct": -20,
             },
             {
-                "roc_period": 5,
-                "momentum_period": 14,
-                "threshold": 0.02,
+                "buy_roc_period": 5,
+                "buy_momentum_period": 14,
+                "buy_threshold": 0.02,
+                "sell_roc_period": 8,
+                "sell_momentum_period": 12,
+                "sell_threshold": 0.03,
                 "train_total_return_pct": 20,
                 "train_sharpe_ratio": 1,
                 "train_max_drawdown_pct": -10,
             },
             {
-                "roc_period": 5,
-                "momentum_period": 10,
-                "threshold": 0.01,
+                "buy_roc_period": 5,
+                "buy_momentum_period": 10,
+                "buy_threshold": 0.01,
+                "sell_roc_period": 9,
+                "sell_momentum_period": 11,
+                "sell_threshold": 0.04,
                 "train_total_return_pct": 20,
                 "train_sharpe_ratio": 2,
                 "train_max_drawdown_pct": -20,
             },
             {
-                "roc_period": 5,
-                "momentum_period": 10,
-                "threshold": 0.02,
+                "buy_roc_period": 5,
+                "buy_momentum_period": 10,
+                "buy_threshold": 0.02,
+                "sell_roc_period": 7,
+                "sell_momentum_period": 10,
+                "sell_threshold": 0.02,
                 "train_total_return_pct": 10,
                 "train_sharpe_ratio": 5,
                 "train_max_drawdown_pct": -5,
@@ -228,7 +315,7 @@ def test_rank_results_uses_deterministic_total_return_order():
     ranked = rank_results(results)
 
     assert ranked["rank"].tolist() == [1, 2, 3, 4]
-    assert ranked[["roc_period", "momentum_period", "threshold"]].values.tolist() == [
+    assert ranked[["buy_roc_period", "buy_momentum_period", "buy_threshold"]].values.tolist() == [
         [5.0, 10.0, 0.01],
         [5.0, 14.0, 0.02],
         [10.0, 14.0, 0.02],
@@ -246,14 +333,40 @@ def test_validate_winner_runs_only_best_setting(monkeypatch):
             calls.append(("engine", kwargs))
 
         def run_backtest(self, df, strategy, coin):
-            calls.append(("run", strategy.roc_period, strategy.momentum_period, strategy.threshold))
+            calls.append(
+                (
+                    "run",
+                    strategy.buy_roc_period,
+                    strategy.buy_momentum_period,
+                    strategy.buy_threshold,
+                    strategy.sell_roc_period,
+                    strategy.sell_momentum_period,
+                    strategy.sell_threshold,
+                )
+            )
             return _FakeResult()
 
     monkeypatch.setattr(search, "BacktestEngine", FakeEngine)
     ranked = pd.DataFrame(
         [
-            {"rank": 1, "roc_period": 5, "momentum_period": 10, "threshold": 0.01},
-            {"rank": 2, "roc_period": 10, "momentum_period": 14, "threshold": 0.02},
+            {
+                "rank": 1,
+                "buy_roc_period": 5,
+                "buy_momentum_period": 10,
+                "buy_threshold": 0.01,
+                "sell_roc_period": 7,
+                "sell_momentum_period": 12,
+                "sell_threshold": 0.03,
+            },
+            {
+                "rank": 2,
+                "buy_roc_period": 10,
+                "buy_momentum_period": 14,
+                "buy_threshold": 0.02,
+                "sell_roc_period": 8,
+                "sell_momentum_period": 13,
+                "sell_threshold": 0.04,
+            },
         ]
     )
 
@@ -262,7 +375,7 @@ def test_validate_winner_runs_only_best_setting(monkeypatch):
     )
 
     assert [call[0] for call in calls] == ["engine", "run"]
-    assert calls[1][1:] == (5, 10, 0.01)
+    assert calls[1][1:] == (5, 10, 0.01, 7, 12, 0.03)
     assert metrics["validation_total_return_pct"] == 12.0
     assert set(metrics) == {
         "validation_total_return_pct",

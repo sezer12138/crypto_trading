@@ -238,46 +238,49 @@ df.loc[
 
 **File**: `src/strategies/momentum.py`
 
-**How it works**: Combines two momentum indicators — Rate of Change (ROC) and raw momentum — and requires both to agree. A buy fires only when ROC turns positive (crosses above the threshold) AND momentum is positive.
+**How it works**: Combines Rate of Change (ROC) and raw momentum, with independent
+lookbacks and thresholds for entries and exits. A buy fires when the buy ROC crosses its positive
+threshold while buy momentum is positive. A sell fires when the sell ROC crosses its negative
+threshold while sell momentum is negative.
 
 **Indicators**:
 ```
-roc            = (close - close[roc_period]) / close[roc_period]
-momentum       = close - close[momentum_period]
-momentum_norm  = momentum / close * 100
+buy_roc            = (close - close[buy_roc_period]) / close[buy_roc_period]
+buy_momentum       = close - close[buy_momentum_period]
+buy_momentum_norm  = buy_momentum / close * 100
+sell_roc           = (close - close[sell_roc_period]) / close[sell_roc_period]
+sell_momentum      = close - close[sell_momentum_period]
+sell_momentum_norm = sell_momentum / close * 100
 ```
 
 **Buy condition**:
 ```
-roc > threshold  AND  momentum_norm > 0  AND  roc[i-1] <= threshold
+buy_roc > buy_threshold AND buy_momentum_norm > 0 AND buy_roc[i-1] <= buy_threshold
 ```
 
 **Sell condition**:
 ```
-roc < -threshold  AND  momentum_norm < 0  AND  roc[i-1] >= -threshold
+sell_roc < -sell_threshold AND sell_momentum_norm < 0 AND sell_roc[i-1] >= -sell_threshold
 ```
 
 **Parameters**:
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `roc_period` | 16 | ROC lookback period |
-| `momentum_period` | 12 | Momentum lookback period |
-| `threshold` | 0.055 | ROC threshold (5.5%) to filter noise |
+| `buy_roc_period` | 16 | Buy ROC lookback period |
+| `buy_momentum_period` | 12 | Buy momentum lookback period |
+| `buy_threshold` | 0.055 | Positive buy ROC threshold (5.5%) |
+| `sell_roc_period` | 16 | Sell ROC lookback period |
+| `sell_momentum_period` | 12 | Sell momentum lookback period |
+| `sell_threshold` | 0.055 | Absolute negative sell ROC threshold (5.5%) |
 
 **Code reference**:
 ```python
-# src/strategies/momentum.py:56-60 — Indicator calculation
-shifted = df["close"].shift(self.roc_period)
-df["roc"] = (df["close"] - shifted) / shifted.replace(0, float("nan"))
-df["momentum"] = df["close"] - df["close"].shift(self.momentum_period)
-df["momentum_norm"] = df["momentum"] / df["close"] * 100
-
-# src/strategies/momentum.py:79-84 — Buy signal
+# Buy signal
 df.loc[
-    (df["roc"] > self.threshold)
-    & (df["momentum_norm"] > 0)
-    & (df["roc"].shift(1) <= self.threshold),
+    (df["buy_roc"] > self.buy_threshold)
+    & (df["buy_momentum_norm"] > 0)
+    & (df["buy_roc"].shift(1) <= self.buy_threshold),
     "signal",
 ] = 1
 ```
@@ -296,24 +299,29 @@ python scripts/grid_search_momentum.py \
   --output results/momentum_grid_search.csv
 ```
 
-The search ranks all 4,800 combinations by total return on the first 70% of candles. Ties are
-resolved by Sharpe ratio, maximum drawdown, and then ascending parameter values. Only the
-winning training configuration is evaluated on the final 30% of candles, which remain
-chronologically later and untouched during selection.
+The same three CLI ranges are used for both sides; separate buy/sell range arguments are not
+required. Stage one evaluates all 4,800 combinations as buy parameters while holding sell
+parameters at their defaults and retains the five best buy triples. Stage two evaluates all 4,800
+sell combinations for each retained buy triple. The default run therefore performs 28,800
+backtests. Stage-two results are ranked by Total Return on the first 70% of candles, with ties
+resolved by Sharpe ratio, maximum drawdown, and then ascending values across all six parameters.
+Only the final winner is evaluated on the chronologically later 30% validation partition.
 
 This broader default grid takes substantially longer than the earlier 150-combination search
 and increases selection-overfitting risk. Use explicit CLI lists for faster experiments, and
 rely on validation or walk-forward results rather than the best training return.
 
-The CSV contains every ranked training result and places validation metrics only on the winning
-row. Treat validation return—not the optimized training return—as the more useful estimate for
-future behavior. A single holdout period still does not guarantee that parameters will work in
-other market regimes; walk-forward testing is the appropriate next step before deployment.
+The CSV contains the ranked stage-two results with all six parameter columns and places validation
+metrics only on the winning row. Treat validation return—not optimized training return—as the more
+useful estimate for future behavior. A single holdout period still does not guarantee that
+parameters will work in other market regimes; walk-forward testing is the appropriate next step
+before deployment.
 
 The drawdown circuit breaker remains enabled by default. Add `--disable-drawdown-breaker` only
 when intentionally comparing results without that portfolio-level risk control.
 
-The built-in defaults use the expanded grid's rank-one training result (`16`, `12`, `0.055`).
+Both built-in sides initially use the old symmetric grid's rank-one training result (`16`, `12`,
+`0.055`).
 It returned 121.50% with a 2.14 Sharpe ratio and -16.98% drawdown on training data, but returned
 -18.16% with a -2.02 Sharpe ratio on chronological validation data. These are training-ranked,
 overfit defaults—not evidence of an out-of-sample improvement.
