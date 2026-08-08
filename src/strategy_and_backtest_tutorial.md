@@ -313,13 +313,18 @@ The CSV includes training, per-slice, aggregate stability, activity, and eligibi
 validated candidate qualifies for a coin-and-interval runtime profile only when it beats the
 current profile on validation, completes at least two validation round trips, and keeps validation
 drawdown at or above -30%. The script reports the decision but never edits production profiles.
-Approved profiles live in `src/strategies/momentum_profiles.py`; `run_backtest.py` automatically
+Runtime profiles live in `src/strategies/momentum_profiles.py`; `run_backtest.py` automatically
 uses a matching profile and otherwise falls back to the general defaults.
 
 The BTC 360-day 5-minute robust search evaluated 1,260 combinations. None of its top 20 training
-candidates completed a round trip in every stability slice, so no BTC/5m runtime profile was
-adopted. This is evidence that the present long-only Momentum signal needs more than parameter
-tuning for that market regime, not a reason to deploy the highest training-return row.
+candidates completed a round trip in every stability slice. The highest-ranked training candidate
+is nevertheless available as an explicitly experimental BTC/5m runtime profile: buy ROC 48, buy
+momentum 48, buy threshold 0.055, sell ROC 144, sell momentum 12, and sell threshold 0.055. It must
+not be treated as validated merely because it ranked first on the training objective.
+
+BTC/1h explicitly records the previous general defaults: buy and sell ROC 16, momentum 12, and
+threshold 0.055. Coins or intervals without a matching profile continue to use the general
+defaults.
 
 The drawdown circuit breaker remains enabled by default. Add `--disable-drawdown-breaker` only
 when intentionally comparing results without that portfolio-level risk control.

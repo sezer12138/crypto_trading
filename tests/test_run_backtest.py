@@ -51,6 +51,57 @@ def test_create_strategy_applies_matching_momentum_profile(monkeypatch):
     assert strategy.sell_threshold == 0.045
 
 
+def test_create_strategy_uses_experimental_btc_5m_profile():
+    from strategies.momentum_profiles import get_momentum_profile
+
+    assert get_momentum_profile("btc", "5m")
+    strategy = run_backtest.create_strategy(
+        "momentum", "btc", "5m", pd.DataFrame({"low": [90.0], "high": [110.0]})
+    )
+
+    assert (
+        strategy.buy_roc_period,
+        strategy.buy_momentum_period,
+        strategy.buy_threshold,
+        strategy.sell_roc_period,
+        strategy.sell_momentum_period,
+        strategy.sell_threshold,
+    ) == (48, 48, 0.055, 144, 12, 0.055)
+
+
+def test_create_strategy_uses_explicit_btc_1h_profile():
+    from strategies.momentum_profiles import get_momentum_profile
+
+    assert get_momentum_profile("btc", "1h")
+    strategy = run_backtest.create_strategy(
+        "momentum", "BTC", "1H", pd.DataFrame({"low": [90.0], "high": [110.0]})
+    )
+
+    assert (
+        strategy.buy_roc_period,
+        strategy.buy_momentum_period,
+        strategy.buy_threshold,
+        strategy.sell_roc_period,
+        strategy.sell_momentum_period,
+        strategy.sell_threshold,
+    ) == (16, 12, 0.055, 16, 12, 0.055)
+
+
+def test_create_strategy_keeps_general_defaults_for_unlisted_coin_interval():
+    strategy = run_backtest.create_strategy(
+        "momentum", "eth", "5m", pd.DataFrame({"low": [90.0], "high": [110.0]})
+    )
+
+    assert (
+        strategy.buy_roc_period,
+        strategy.buy_momentum_period,
+        strategy.buy_threshold,
+        strategy.sell_roc_period,
+        strategy.sell_momentum_period,
+        strategy.sell_threshold,
+    ) == (16, 12, 0.055, 16, 12, 0.055)
+
+
 def test_create_strategy_preserves_grid_range_construction(monkeypatch):
     monkeypatch.setattr(run_backtest, "get_momentum_profile", lambda coin, interval: {})
     data = pd.DataFrame({"low": [90.0, 95.0], "high": [100.0, 110.0]})

@@ -14,8 +14,27 @@ class MomentumProfile(TypedDict, total=False):
     sell_threshold: float
 
 
-# Profiles are added only after passing the documented validation and activity guard.
-MOMENTUM_PROFILES: Dict[Tuple[str, str], MomentumProfile] = {}
+MOMENTUM_PROFILES: Dict[Tuple[str, str], MomentumProfile] = {
+    # Explicit experimental override: ranked first on BTC/5m training data but did not
+    # complete a round trip in every stability slice.
+    ("btc", "5m"): {
+        "buy_roc_period": 48,
+        "buy_momentum_period": 48,
+        "buy_threshold": 0.055,
+        "sell_roc_period": 144,
+        "sell_momentum_period": 12,
+        "sell_threshold": 0.055,
+    },
+    # Previous BTC/1h defaults made explicit for interval-aware runtime resolution.
+    ("btc", "1h"): {
+        "buy_roc_period": 16,
+        "buy_momentum_period": 12,
+        "buy_threshold": 0.055,
+        "sell_roc_period": 16,
+        "sell_momentum_period": 12,
+        "sell_threshold": 0.055,
+    },
+}
 
 
 def get_momentum_profile(coin: str, interval: str) -> MomentumProfile:
