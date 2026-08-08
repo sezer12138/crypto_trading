@@ -292,30 +292,34 @@ Use the standalone grid-search script to compare Momentum lookbacks and ROC thre
 ```bash
 python scripts/grid_search_momentum.py \
   --data data/historical/btc_1h_730d.csv \
-  --roc-periods 2,4,6,8,10,12,14,16,18,20,22,24,26,28,30 \
-  --momentum-periods 2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40 \
-  --thresholds 0.005,0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,0.055,0.060,0.065,0.070,0.075,0.080 \
   --train-ratio 0.7 \
   --output results/momentum_grid_search.csv
 ```
 
-The same three CLI ranges are used for both sides; separate buy/sell range arguments are not
-required. Stage one evaluates all 4,800 combinations as buy parameters while holding sell
-parameters at their defaults and retains the five best buy triples. Stage two evaluates all 4,800
-sell combinations for each retained buy triple. The default run therefore performs 28,800
-backtests. Stage-two results are ranked by Total Return on the first 70% of candles, with ties
-resolved by Sharpe ratio, maximum drawdown, and then ascending values across all six parameters.
-Only the final winner is evaluated on the chronologically later 30% validation partition.
+When ranges are omitted, the script infers the candle cadence. Hourly and longer data retain the
+existing 4,800-combination shared grid. Sub-hourly data converts duration candidates into candle
+counts: ROC horizons of 2–36 hours, momentum horizons of 1–24 hours, and thresholds from 1.5% to
+5.5%. On 5-minute data this produces 210 shared combinations and 1,260 two-stage evaluations.
+Explicit `--roc-periods`, `--momentum-periods`, and `--thresholds` values remain raw candle counts.
+The same ranges are used for buy and sell; there are no separate side-specific range arguments.
 
-This broader default grid takes substantially longer than the earlier 150-combination search
-and increases selection-overfitting risk. Use explicit CLI lists for faster experiments, and
-rely on validation or walk-forward results rather than the best training return.
+Stage one searches buy triples with default sell parameters and retains five buys. Stage two
+searches every sell triple for those buys and shortlists the top 20 candidates by training Total
+Return. Each shortlisted candidate is then replayed on three chronological stability slices. It
+must complete at least one round trip in every slice before it can reach the untouched final 30%
+validation partition.
 
-The CSV contains the ranked stage-two results with all six parameter columns and places validation
-metrics only on the winning row. Treat validation return—not optimized training return—as the more
-useful estimate for future behavior. A single holdout period still does not guarantee that
-parameters will work in other market regimes; walk-forward testing is the appropriate next step
-before deployment.
+The CSV includes training, per-slice, aggregate stability, activity, and eligibility columns. A
+validated candidate qualifies for a coin-and-interval runtime profile only when it beats the
+current profile on validation, completes at least two validation round trips, and keeps validation
+drawdown at or above -30%. The script reports the decision but never edits production profiles.
+Approved profiles live in `src/strategies/momentum_profiles.py`; `run_backtest.py` automatically
+uses a matching profile and otherwise falls back to the general defaults.
+
+The BTC 360-day 5-minute robust search evaluated 1,260 combinations. None of its top 20 training
+candidates completed a round trip in every stability slice, so no BTC/5m runtime profile was
+adopted. This is evidence that the present long-only Momentum signal needs more than parameter
+tuning for that market regime, not a reason to deploy the highest training-return row.
 
 The drawdown circuit breaker remains enabled by default. Add `--disable-drawdown-breaker` only
 when intentionally comparing results without that portfolio-level risk control.

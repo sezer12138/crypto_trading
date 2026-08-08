@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from backtest import BacktestEngine
 from strategies.momentum import MomentumStrategy
+from strategies.momentum_profiles import get_momentum_profile
 from strategies.constants import (
     DEFAULT_MOMENTUM_SELL_PERIOD,
     DEFAULT_MOMENTUM_SELL_ROC_PERIOD,
@@ -37,7 +38,12 @@ METRIC_NAMES = (
 DEFAULT_ROC_PERIODS = list(range(2, 31, 2))
 DEFAULT_MOMENTUM_PERIODS = list(range(2, 41, 2))
 DEFAULT_THRESHOLDS = [value / 1000 for value in range(5, 81, 5)]
+SUB_HOURLY_ROC_HOURS = [2, 4, 8, 12, 16, 24, 36]
+SUB_HOURLY_MOMENTUM_HOURS = [1, 2, 4, 6, 12, 24]
+SUB_HOURLY_THRESHOLDS = [0.015, 0.025, 0.035, 0.045, 0.055]
 TOP_BUY_CANDIDATES = 5
+STABILITY_SLICE_COUNT = 3
+STABILITY_SHORTLIST_SIZE = 20
 PARAMETER_COLUMNS = (
     "buy_roc_period",
     "buy_momentum_period",
@@ -129,6 +135,53 @@ def chronological_split(
     if len(train) <= max_lookback or len(validation) <= max_lookback:
         raise ValueError("Train and validation partitions must exceed the maximum lookback")
     return train, validation
+
+
+def infer_interval_minutes(index: pd.DatetimeIndex) -> int:
+    """Infer the dominant positive whole-minute candle cadence."""
+    if len(index) < 3:
+        raise ValueError("At least three timestamps are required to infer candle cadence")
+    deltas = index.to_series().diff().dropna().dt.total_seconds() / 60
+    valid = deltas[(deltas > 0) & (deltas % 1 == 0)].astype(int)
+    if len(valid) != len(deltas):
+        raise ValueError("Timestamps must have a positive whole-minute cadence")
+    counts = valid.value_counts()
+    if counts.empty or int(counts.iloc[0]) <= len(valid) / 2:
+        raise ValueError("Timestamps do not have a dominant candle cadence")
+    return int(counts.index[0])
+
+
+def _hours_to_bars(hours: Sequence[int], interval_minutes: int) -> List[int]:
+    """Convert duration candidates to unique candle counts."""
+    return list(dict.fromkeys(max(1, round(hour * 60 / interval_minutes)) for hour in hours))
+
+
+def resolve_search_ranges(
+    args: argparse.Namespace, data: pd.DataFrame
+) -> Tuple[List[int], List[int], List[float]]:
+    """Resolve explicit raw-bar ranges or interval-aware defaults."""
+    if (
+        args.roc_periods is not None
+        and args.momentum_periods is not None
+        and args.thresholds is not None
+    ):
+        return args.roc_periods, args.momentum_periods, args.thresholds
+
+    interval_minutes = infer_interval_minutes(data.index)
+    if interval_minutes < 60:
+        default_roc = _hours_to_bars(SUB_HOURLY_ROC_HOURS, interval_minutes)
+        default_momentum = _hours_to_bars(SUB_HOURLY_MOMENTUM_HOURS, interval_minutes)
+        default_thresholds = SUB_HOURLY_THRESHOLDS.copy()
+    else:
+        default_roc = DEFAULT_ROC_PERIODS.copy()
+        default_momentum = DEFAULT_MOMENTUM_PERIODS.copy()
+        default_thresholds = DEFAULT_THRESHOLDS.copy()
+
+    return (
+        args.roc_periods if args.roc_periods is not None else default_roc,
+        args.momentum_periods if args.momentum_periods is not None else default_momentum,
+        args.thresholds if args.thresholds is not None else default_thresholds,
+    )
 
 
 def _prefixed_metrics(metrics: Dict[str, float], prefix: str) -> Dict[str, float]:
@@ -229,6 +282,103 @@ def evaluate_sell_grid(
     return pd.DataFrame(rows)
 
 
+def split_stability_slices(
+    train_df: pd.DataFrame, slice_count: int, max_lookback: int
+) -> List[pd.DataFrame]:
+    """Split training data into equal, ordered, non-overlapping stability slices."""
+    if slice_count < 1:
+        raise ValueError("The stability slice count must be positive")
+    base_size, remainder = divmod(len(train_df), slice_count)
+    sizes = [base_size + (1 if index < remainder else 0) for index in range(slice_count)]
+    if min(sizes) <= max_lookback:
+        raise ValueError("Each stability slice must exceed the maximum lookback")
+    slices = []
+    start = 0
+    for size in sizes:
+        slices.append(train_df.iloc[start : start + size].copy())
+        start += size
+    return slices
+
+
+def evaluate_stability(
+    candidates: pd.DataFrame,
+    slices: Sequence[pd.DataFrame],
+    capital: float,
+    drawdown_breaker_enabled: bool,
+    coin: str,
+) -> pd.DataFrame:
+    """Evaluate shortlisted candidates across chronological stability slices."""
+    rows = []
+    for _, candidate in candidates.iterrows():
+        parameters = {
+            name: (int(candidate[name]) if "period" in name else float(candidate[name]))
+            for name in PARAMETER_COLUMNS
+        }
+        row = candidate.to_dict()
+        returns = []
+        sharpes = []
+        drawdowns = []
+        round_trips = []
+        for number, data_slice in enumerate(slices, start=1):
+            metrics = _run_combination(
+                data_slice, parameters, capital, drawdown_breaker_enabled, coin
+            )
+            total_return = float(metrics["train_total_return_pct"])
+            trades = int(metrics["train_total_trades"])
+            completed_round_trips = trades // 2
+            returns.append(total_return)
+            sharpes.append(float(metrics["train_sharpe_ratio"]))
+            drawdowns.append(float(metrics["train_max_drawdown_pct"]))
+            round_trips.append(completed_round_trips)
+            row[f"stability_slice_{number}_return_pct"] = total_return
+            row[f"stability_slice_{number}_round_trips"] = completed_round_trips
+
+        compounded = (math.prod(1 + value / 100 for value in returns) - 1) * 100
+        row["stability_total_return_pct"] = compounded
+        row["stability_worst_return_pct"] = min(returns)
+        row["stability_mean_sharpe_ratio"] = sum(sharpes) / len(sharpes)
+        row["stability_max_drawdown_pct"] = min(drawdowns)
+        row["stability_total_round_trips"] = sum(round_trips)
+        row["stability_eligible"] = all(value >= 1 for value in round_trips) and sum(
+            round_trips
+        ) >= len(slices)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def rank_stable_candidates(results: pd.DataFrame) -> pd.DataFrame:
+    """Rank sufficiently active candidates by stability Total Return."""
+    eligible = results.loc[results["stability_eligible"].astype(bool)].copy()
+    if eligible.empty:
+        eligible.insert(0, "stability_rank", pd.Series(dtype=int))
+        return eligible
+    ranked = eligible.sort_values(
+        by=[
+            "stability_total_return_pct",
+            "stability_worst_return_pct",
+            "stability_mean_sharpe_ratio",
+            "stability_max_drawdown_pct",
+            *PARAMETER_COLUMNS,
+        ],
+        ascending=[False, False, False, False, True, True, True, True, True, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    ranked.insert(0, "stability_rank", range(1, len(ranked) + 1))
+    return ranked
+
+
+def profile_adoption_passes(
+    candidate_metrics: Dict[str, float], baseline_metrics: Dict[str, float]
+) -> bool:
+    """Return whether validation evidence is sufficient for runtime profile adoption."""
+    return (
+        candidate_metrics["validation_total_return_pct"]
+        > baseline_metrics["validation_total_return_pct"]
+        and int(candidate_metrics["validation_total_trades"]) // 2 >= 2
+        and candidate_metrics["validation_max_drawdown_pct"] >= -30.0
+    )
+
+
 def rank_results(results: pd.DataFrame) -> pd.DataFrame:
     """Rank training results by return and deterministic tie breakers."""
     ranked = results.sort_values(
@@ -270,6 +420,29 @@ def validate_winner(
     return _prefixed_metrics(result.metrics, "validation")
 
 
+def _interval_label(interval_minutes: int) -> str:
+    """Return the canonical repository interval label for a candle cadence."""
+    known = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}
+    return known.get(interval_minutes, f"{interval_minutes}m")
+
+
+def validate_current_profile(
+    validation_df: pd.DataFrame,
+    capital: float,
+    drawdown_breaker_enabled: bool,
+    coin: str,
+    interval: str,
+) -> Dict[str, float]:
+    """Evaluate the currently resolved runtime profile on validation data."""
+    strategy = MomentumStrategy(**get_momentum_profile(coin, interval))
+    engine = BacktestEngine(
+        initial_capital=capital,
+        drawdown_breaker_enabled=drawdown_breaker_enabled,
+    )
+    result = engine.run_backtest(validation_df, strategy, coin=coin)
+    return _prefixed_metrics(result.metrics, "validation")
+
+
 def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse Momentum grid-search command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -284,19 +457,19 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--roc-periods",
         type=parse_int_list,
-        default=DEFAULT_ROC_PERIODS.copy(),
-        help="Comma-separated ROC lookback periods",
+        default=None,
+        help="Comma-separated ROC lookback periods in candles",
     )
     parser.add_argument(
         "--momentum-periods",
         type=parse_int_list,
-        default=DEFAULT_MOMENTUM_PERIODS.copy(),
-        help="Comma-separated momentum lookback periods",
+        default=None,
+        help="Comma-separated momentum lookback periods in candles",
     )
     parser.add_argument(
         "--thresholds",
         type=parse_float_list,
-        default=DEFAULT_THRESHOLDS.copy(),
+        default=None,
         help="Comma-separated positive ROC thresholds",
     )
     parser.add_argument("--train-ratio", type=float, default=0.7)
@@ -331,15 +504,17 @@ def write_results(
 
 
 def run_search(args: argparse.Namespace) -> pd.DataFrame:
-    """Run training grid search, winner validation, and CSV output."""
+    """Run interval-aware search, stability selection, and final validation."""
     if args.capital <= 0 or not math.isfinite(args.capital):
         raise ValueError("Initial capital must be positive")
     data = load_ohlcv(args.data)
-    max_lookback = max(max(args.roc_periods), max(args.momentum_periods))
+    interval_minutes = infer_interval_minutes(data.index)
+    roc_periods, momentum_periods, thresholds = resolve_search_ranges(args, data)
+    max_lookback = max(max(roc_periods), max(momentum_periods))
     train, validation = chronological_split(data, args.train_ratio, max_lookback)
     breaker_enabled = not args.disable_drawdown_breaker
 
-    grid_size = len(args.roc_periods) * len(args.momentum_periods) * len(args.thresholds)
+    grid_size = len(roc_periods) * len(momentum_periods) * len(thresholds)
     retained_count = min(TOP_BUY_CANDIDATES, grid_size)
     evaluation_count = grid_size + retained_count * grid_size
     print(
@@ -354,9 +529,9 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
     with quiet_backtest_logs():
         buy_results = evaluate_buy_grid(
             train,
-            args.roc_periods,
-            args.momentum_periods,
-            args.thresholds,
+            roc_periods,
+            momentum_periods,
+            thresholds,
             args.capital,
             breaker_enabled,
             args.coin.upper(),
@@ -365,22 +540,64 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
         training_results = evaluate_sell_grid(
             train,
             buy_candidates,
-            args.roc_periods,
-            args.momentum_periods,
-            args.thresholds,
+            roc_periods,
+            momentum_periods,
+            thresholds,
             args.capital,
             breaker_enabled,
             args.coin.upper(),
         )
         ranked = rank_results(training_results)
-        validation_metrics = validate_winner(
-            validation,
-            ranked,
+        shortlist = ranked.head(STABILITY_SHORTLIST_SIZE).copy()
+        slices = split_stability_slices(train, STABILITY_SLICE_COUNT, max_lookback)
+        stability_results = evaluate_stability(
+            shortlist,
+            slices,
             args.capital,
             breaker_enabled,
             args.coin.upper(),
         )
-    written = write_results(ranked, validation_metrics, args.output)
+        stable_ranked = rank_stable_candidates(stability_results)
+
+        if stable_ranked.empty:
+            diagnostics = stability_results.copy()
+            diagnostics.insert(0, "stability_rank", float("nan"))
+            written = write_results(diagnostics, {}, args.output)
+            print(
+                "No deployable winner: no shortlisted candidate completed at least "
+                "one round trip in every stability slice"
+            )
+            print(f"Results written to: {args.output}")
+            return written
+
+        validation_metrics = validate_winner(
+            validation,
+            stable_ranked,
+            args.capital,
+            breaker_enabled,
+            args.coin.upper(),
+        )
+        baseline_metrics = validate_current_profile(
+            validation,
+            args.capital,
+            breaker_enabled,
+            args.coin.upper(),
+            _interval_label(interval_minutes),
+        )
+
+    inactive = stability_results.loc[~stability_results["stability_eligible"].astype(bool)].copy()
+    inactive.insert(0, "stability_rank", float("nan"))
+    ordered = pd.concat([stable_ranked, inactive], ignore_index=True, sort=False)
+    adoption_passed = profile_adoption_passes(validation_metrics, baseline_metrics)
+    output_metrics = validation_metrics.copy()
+    output_metrics.update(
+        {
+            name.replace("validation_", "baseline_validation_"): value
+            for name, value in baseline_metrics.items()
+        }
+    )
+    output_metrics["profile_adoption_passed"] = float(adoption_passed)
+    written = write_results(ordered, output_metrics, args.output)
     winner = written.iloc[0]
     print(
         "Winning parameters: "
@@ -391,8 +608,13 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
         f"sell_momentum_period={int(winner['sell_momentum_period'])}, "
         f"sell_threshold={winner['sell_threshold']:.6g}"
     )
-    print(f"Training total return: {winner['train_total_return_pct']:.2f}%")
+    print(f"Stability total return: {winner['stability_total_return_pct']:.2f}%")
     print(f"Validation total return: {winner['validation_total_return_pct']:.2f}%")
+    print(
+        f"Current-profile validation return: "
+        f"{winner['baseline_validation_total_return_pct']:.2f}%"
+    )
+    print(f"Profile adoption guard: {'PASS' if adoption_passed else 'FAIL'}")
     print(f"Results written to: {args.output}")
     return written
 

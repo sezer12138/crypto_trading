@@ -40,7 +40,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from historical_data import HistoricalDataFetcher
-from strategies import get_strategy
+from strategies import TradingStrategy, get_strategy
+from strategies.momentum_profiles import get_momentum_profile
 from backtest import BacktestEngine, BacktestResult
 from visualization import Visualizer
 from visualization.html_report import HTMLReportGenerator
@@ -58,6 +59,27 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+
+def create_strategy(
+    strategy_name: str, coin: str, interval: str, df: pd.DataFrame
+) -> TradingStrategy:
+    """Create a strategy with runtime parameters derived from its backtest context."""
+    if strategy_name == "grid":
+        lookback_bars = min(100, len(df))
+        lower_price = df["low"].iloc[:lookback_bars].min()
+        upper_price = df["high"].iloc[:lookback_bars].max()
+        margin = (upper_price - lower_price) * 0.1
+        return get_strategy(
+            strategy_name,
+            lower_price=lower_price - margin,
+            upper_price=upper_price + margin,
+        )
+    if strategy_name == "martingale":
+        return get_strategy(strategy_name, base_amount=0.001, multiplier=2.0, max_steps=5)
+    if strategy_name == "momentum":
+        return get_strategy(strategy_name, **get_momentum_profile(coin, interval))
+    return get_strategy(strategy_name)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -236,20 +258,7 @@ def run_single_backtest(
         )
 
     # 2. Create strategy
-    if strategy_name == "grid":
-        # Grid strategy: calculate grid range from first N bars to avoid look-ahead bias
-        lookback_bars = min(100, len(df))
-        lower_price = df["low"].iloc[:lookback_bars].min()
-        upper_price = df["high"].iloc[:lookback_bars].max()
-        # Add margin to accommodate price movement beyond the initial range
-        margin = (upper_price - lower_price) * 0.1
-        lower_price -= margin
-        upper_price += margin
-        strategy = get_strategy(strategy_name, lower_price=lower_price, upper_price=upper_price)
-    elif strategy_name == "martingale":
-        strategy = get_strategy(strategy_name, base_amount=0.001, multiplier=2.0, max_steps=5)
-    else:
-        strategy = get_strategy(strategy_name)
+    strategy = create_strategy(strategy_name, coin, interval, df)
 
     # 3. Run backtest
     engine = BacktestEngine(

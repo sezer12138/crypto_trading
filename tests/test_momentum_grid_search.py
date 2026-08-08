@@ -10,6 +10,8 @@ from scripts.grid_search_momentum import (
     chronological_split,
     evaluate_buy_grid,
     evaluate_sell_grid,
+    evaluate_stability,
+    infer_interval_minutes,
     load_ohlcv,
     main,
     parse_arguments,
@@ -17,7 +19,11 @@ from scripts.grid_search_momentum import (
     parse_int_list,
     quiet_backtest_logs,
     rank_results,
+    rank_stable_candidates,
+    profile_adoption_passes,
+    resolve_search_ranges,
     select_top_buy_candidates,
+    split_stability_slices,
     validate_winner,
     write_results,
 )
@@ -133,6 +139,63 @@ def test_load_ohlcv_rejects_non_finite_values(tmp_path):
     _write_csv(path, data)
     with pytest.raises(ValueError, match="finite"):
         load_ohlcv(path)
+
+
+def test_infer_interval_minutes_uses_dominant_positive_cadence():
+    index = pd.DatetimeIndex(
+        [
+            "2024-01-01 00:00:00",
+            "2024-01-01 00:05:00",
+            "2024-01-01 00:10:00",
+            "2024-01-01 00:20:00",
+            "2024-01-01 00:25:00",
+        ]
+    )
+
+    assert infer_interval_minutes(index) == 5
+
+
+def test_infer_interval_minutes_rejects_ambiguous_cadence():
+    index = pd.DatetimeIndex(
+        [
+            "2024-01-01 00:00:00",
+            "2024-01-01 00:05:00",
+            "2024-01-01 00:15:00",
+            "2024-01-01 00:30:00",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="cadence"):
+        infer_interval_minutes(index)
+
+
+def test_resolve_search_ranges_converts_sub_hourly_durations_to_bars():
+    args = parse_arguments([])
+    data = _ohlcv_frame(500)
+    data.index = pd.date_range("2024-01-01", periods=len(data), freq="5min")
+
+    roc_periods, momentum_periods, thresholds = resolve_search_ranges(args, data)
+
+    assert roc_periods == [24, 48, 96, 144, 192, 288, 432]
+    assert momentum_periods == [12, 24, 48, 72, 144, 288]
+    assert thresholds == [0.015, 0.025, 0.035, 0.045, 0.055]
+
+
+def test_resolve_search_ranges_preserves_explicit_raw_bar_overrides():
+    args = parse_arguments(
+        [
+            "--roc-periods",
+            "3,6",
+            "--momentum-periods",
+            "4,8",
+            "--thresholds",
+            "0.01,0.03",
+        ]
+    )
+    data = _ohlcv_frame(100)
+    data.index = pd.date_range("2024-01-01", periods=len(data), freq="5min")
+
+    assert resolve_search_ranges(args, data) == ([3, 6], [4, 8], [0.01, 0.03])
 
 
 class _FakeResult:
@@ -323,6 +386,142 @@ def test_rank_results_uses_deterministic_total_return_order():
     ]
 
 
+def test_split_stability_slices_returns_ordered_non_overlapping_partitions():
+    data = _ohlcv_frame(30)
+
+    slices = split_stability_slices(data, slice_count=3, max_lookback=2)
+
+    assert [len(part) for part in slices] == [10, 10, 10]
+    assert slices[0].index.max() < slices[1].index.min()
+    assert slices[1].index.max() < slices[2].index.min()
+
+
+def test_evaluate_stability_compounds_returns_and_counts_round_trips(monkeypatch):
+    import scripts.grid_search_momentum as search
+
+    candidate = pd.DataFrame(
+        [
+            {
+                "buy_roc_period": 5,
+                "buy_momentum_period": 7,
+                "buy_threshold": 0.01,
+                "sell_roc_period": 6,
+                "sell_momentum_period": 8,
+                "sell_threshold": 0.02,
+                "train_total_return_pct": 20.0,
+            }
+        ]
+    )
+    slices = [_ohlcv_frame(10) for _ in range(3)]
+    for number, part in enumerate(slices, start=1):
+        part.attrs["slice_number"] = number
+    returns = {1: 10.0, 2: -5.0, 3: 2.0}
+    trades = {1: 2, 2: 4, 3: 2}
+
+    def fake_run(data, parameters, capital, drawdown_breaker_enabled, coin):
+        number = data.attrs["slice_number"]
+        return {
+            **parameters,
+            "train_total_return_pct": returns[number],
+            "train_sharpe_ratio": float(number),
+            "train_max_drawdown_pct": -5.0 * number,
+            "train_total_trades": trades[number],
+        }
+
+    monkeypatch.setattr(search, "_run_combination", fake_run)
+
+    evaluated = evaluate_stability(candidate, slices, 10000.0, False, "BTC")
+    row = evaluated.iloc[0]
+
+    assert row["stability_total_return_pct"] == pytest.approx(6.59)
+    assert row["stability_worst_return_pct"] == -5.0
+    assert row["stability_total_round_trips"] == 4
+    assert bool(row["stability_eligible"]) is True
+
+
+def test_rank_stable_candidates_excludes_inactive_candidate():
+    results = pd.DataFrame(
+        [
+            {
+                "buy_roc_period": 5,
+                "buy_momentum_period": 7,
+                "buy_threshold": 0.01,
+                "sell_roc_period": 6,
+                "sell_momentum_period": 8,
+                "sell_threshold": 0.02,
+                "stability_total_return_pct": 50.0,
+                "stability_worst_return_pct": 10.0,
+                "stability_mean_sharpe_ratio": 2.0,
+                "stability_max_drawdown_pct": -5.0,
+                "stability_eligible": False,
+            },
+            {
+                "buy_roc_period": 9,
+                "buy_momentum_period": 11,
+                "buy_threshold": 0.03,
+                "sell_roc_period": 10,
+                "sell_momentum_period": 12,
+                "sell_threshold": 0.04,
+                "stability_total_return_pct": 5.0,
+                "stability_worst_return_pct": -2.0,
+                "stability_mean_sharpe_ratio": 0.5,
+                "stability_max_drawdown_pct": -8.0,
+                "stability_eligible": True,
+            },
+        ]
+    )
+
+    ranked = rank_stable_candidates(results)
+
+    assert ranked["buy_roc_period"].tolist() == [9]
+    assert ranked["stability_rank"].tolist() == [1]
+
+
+@pytest.mark.parametrize(
+    "candidate,baseline,expected",
+    [
+        (
+            {
+                "validation_total_return_pct": 5.0,
+                "validation_total_trades": 4,
+                "validation_max_drawdown_pct": -30.0,
+            },
+            {"validation_total_return_pct": 4.0},
+            True,
+        ),
+        (
+            {
+                "validation_total_return_pct": 4.0,
+                "validation_total_trades": 4,
+                "validation_max_drawdown_pct": -20.0,
+            },
+            {"validation_total_return_pct": 4.0},
+            False,
+        ),
+        (
+            {
+                "validation_total_return_pct": 5.0,
+                "validation_total_trades": 2,
+                "validation_max_drawdown_pct": -20.0,
+            },
+            {"validation_total_return_pct": 4.0},
+            False,
+        ),
+        (
+            {
+                "validation_total_return_pct": 5.0,
+                "validation_total_trades": 4,
+                "validation_max_drawdown_pct": -30.01,
+            },
+            {"validation_total_return_pct": 4.0},
+            False,
+        ),
+    ],
+)
+def test_profile_adoption_guard(candidate, baseline, expected):
+    assert profile_adoption_passes(candidate, baseline) is expected
+
+
 def test_validate_winner_runs_only_best_setting(monkeypatch):
     import scripts.grid_search_momentum as search
 
@@ -390,10 +589,9 @@ def test_validate_winner_runs_only_best_setting(monkeypatch):
 def test_parse_arguments_has_expected_defaults():
     args = parse_arguments([])
 
-    assert args.roc_periods == list(range(2, 31, 2))
-    assert args.momentum_periods == list(range(2, 41, 2))
-    assert args.thresholds == [value / 1000 for value in range(5, 81, 5)]
-    assert len(args.roc_periods) * len(args.momentum_periods) * len(args.thresholds) == 4800
+    assert args.roc_periods is None
+    assert args.momentum_periods is None
+    assert args.thresholds is None
     assert args.train_ratio == 0.7
     assert args.capital == 10000.0
     assert args.disable_drawdown_breaker is False
@@ -489,9 +687,8 @@ def test_main_runs_one_combination_end_to_end(tmp_path, capsys):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert len(pd.read_csv(output_path)) == 1
-    assert "Winning parameters" in captured.out
-    assert "Training total return" in captured.out
-    assert "Validation total return" in captured.out
+    assert "No deployable winner" in captured.out
+    assert "stability_eligible" in pd.read_csv(output_path).columns
 
 
 def test_main_reports_invalid_input(tmp_path, capsys):

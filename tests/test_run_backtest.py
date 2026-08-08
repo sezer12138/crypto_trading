@@ -3,9 +3,62 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import run_backtest
+
+
+def test_momentum_profile_normalizes_key_and_returns_independent_copy(monkeypatch):
+    import strategies.momentum_profiles as profiles
+
+    configured = {
+        "buy_roc_period": 48,
+        "buy_momentum_period": 72,
+        "buy_threshold": 0.055,
+        "sell_roc_period": 48,
+        "sell_momentum_period": 24,
+        "sell_threshold": 0.045,
+    }
+    monkeypatch.setattr(profiles, "MOMENTUM_PROFILES", {("btc", "5m"): configured})
+
+    resolved = profiles.get_momentum_profile(" BTC ", "5M")
+    resolved["buy_roc_period"] = 999
+
+    assert profiles.get_momentum_profile("btc", "5m") == configured
+    assert profiles.get_momentum_profile("eth", "5m") == {}
+
+
+def test_create_strategy_applies_matching_momentum_profile(monkeypatch):
+    parameters = {
+        "buy_roc_period": 48,
+        "buy_momentum_period": 72,
+        "buy_threshold": 0.055,
+        "sell_roc_period": 48,
+        "sell_momentum_period": 24,
+        "sell_threshold": 0.045,
+    }
+    monkeypatch.setattr(run_backtest, "get_momentum_profile", lambda coin, interval: parameters)
+
+    strategy = run_backtest.create_strategy(
+        "momentum", "btc", "5m", pd.DataFrame({"low": [90.0], "high": [110.0]})
+    )
+
+    assert strategy.buy_roc_period == 48
+    assert strategy.buy_momentum_period == 72
+    assert strategy.sell_momentum_period == 24
+    assert strategy.sell_threshold == 0.045
+
+
+def test_create_strategy_preserves_grid_range_construction(monkeypatch):
+    monkeypatch.setattr(run_backtest, "get_momentum_profile", lambda coin, interval: {})
+    data = pd.DataFrame({"low": [90.0, 95.0], "high": [100.0, 110.0]})
+
+    strategy = run_backtest.create_strategy("grid", "btc", "5m", data)
+
+    assert strategy.lower_price == 88.0
+    assert strategy.upper_price == 112.0
 
 
 def test_drawdown_breaker_is_enabled_by_default(monkeypatch):
