@@ -26,6 +26,8 @@ Options:
     --capital       Initial capital [default: 10000]
     --compare       Compare all strategies
     --no-viz        Skip visualization charts
+    --disable-loss-cooldown
+                    Disable pausing new entries after consecutive losing trades
 """
 
 import argparse
@@ -176,6 +178,12 @@ Examples:
     )
 
     parser.add_argument(
+        "--disable-loss-cooldown",
+        action="store_true",
+        help="Disable pausing new entries after consecutive losing trades",
+    )
+
+    parser.add_argument(
         "--source",
         type=str,
         default=None,
@@ -195,6 +203,7 @@ def run_single_backtest(
     fetcher: HistoricalDataFetcher,
     generate_html: bool = True,
     drawdown_breaker_enabled: bool = True,
+    loss_cooldown_enabled: bool = True,
 ) -> Tuple[Optional[BacktestResult], Optional[pd.DataFrame]]:
     """
     Run a single backtest
@@ -208,6 +217,7 @@ def run_single_backtest(
         fetcher: Data fetcher instance
         generate_html: Whether to generate HTML report
         drawdown_breaker_enabled: Whether to force liquidation and halt trading at max drawdown
+        loss_cooldown_enabled: Whether to pause entries after consecutive losing trades
 
     Returns:
         (BacktestResult, DataFrame) tuple, or (None, None) on failure
@@ -264,6 +274,7 @@ def run_single_backtest(
     engine = BacktestEngine(
         initial_capital=capital,
         drawdown_breaker_enabled=drawdown_breaker_enabled,
+        loss_cooldown_enabled=loss_cooldown_enabled,
     )
     result = engine.run_backtest(df, strategy, coin=coin.upper())
 
@@ -311,6 +322,7 @@ def compare_strategies(
     save_report: bool = True,
     data_source: str = None,
     drawdown_breaker_enabled: bool = True,
+    loss_cooldown_enabled: bool = True,
 ) -> Dict[str, BacktestResult]:
     """
     Compare performance of multiple strategies
@@ -325,6 +337,7 @@ def compare_strategies(
         save_report: Whether to save visualization report
         data_source: Data source ("binance" or "okx")
         drawdown_breaker_enabled: Whether to force liquidation and halt trading at max drawdown
+        loss_cooldown_enabled: Whether to pause entries after consecutive losing trades
 
     Returns:
         Dict mapping strategy name to BacktestResult
@@ -373,6 +386,7 @@ def compare_strategies(
             capital,
             fetcher,
             drawdown_breaker_enabled=drawdown_breaker_enabled,
+            loss_cooldown_enabled=loss_cooldown_enabled,
         )
 
         if result:
@@ -475,6 +489,7 @@ def main() -> None:
     """Main entry point"""
     args = parse_arguments()
     drawdown_breaker_enabled = not args.disable_drawdown_breaker
+    loss_cooldown_enabled = not args.disable_loss_cooldown
 
     # Ensure directories exist
     Path("data/historical").mkdir(parents=True, exist_ok=True)
@@ -490,6 +505,7 @@ def main() -> None:
             args.capital,
             data_source=args.source,
             drawdown_breaker_enabled=drawdown_breaker_enabled,
+            loss_cooldown_enabled=loss_cooldown_enabled,
         )
 
     elif args.coin == "all":
@@ -506,6 +522,7 @@ def main() -> None:
                 args.capital,
                 fetcher,
                 drawdown_breaker_enabled=drawdown_breaker_enabled,
+                loss_cooldown_enabled=loss_cooldown_enabled,
             )
 
             if result and not args.no_viz:
@@ -524,6 +541,7 @@ def main() -> None:
             args.capital,
             fetcher,
             drawdown_breaker_enabled=drawdown_breaker_enabled,
+            loss_cooldown_enabled=loss_cooldown_enabled,
         )
 
         if result and not args.no_viz:
