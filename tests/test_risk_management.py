@@ -22,10 +22,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from backtest import BacktestEngine, SIGNAL_BUY, SIGNAL_SELL
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class IdentityStrategy:
     """Strategy that returns signals as-is (no processing)."""
@@ -129,9 +129,7 @@ class TestMaxTradesPerDay:
 
         df = _make_df(prices, start="2024-01-01", freq="h", signals=signals)
 
-        engine = BacktestEngine(
-            initial_capital=10000, max_trades_per_day=6, min_holding_bars=0
-        )
+        engine = BacktestEngine(initial_capital=10000, max_trades_per_day=6, min_holding_bars=0)
         result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
 
         # max 6 trades in the day: 3 buys + 3 sells = 6 total
@@ -169,6 +167,56 @@ class TestMaxTradesPerDay:
 
 
 # ---------------------------------------------------------------------------
+# Consecutive-loss cooldown
+# ---------------------------------------------------------------------------
+
+
+class TestConsecutiveLossCooldown:
+    """Tests for pausing entries after consecutive losing trades."""
+
+    @staticmethod
+    def _losing_round_trips() -> pd.DataFrame:
+        prices = [100.0, 90.0] * 4
+        signals = [SIGNAL_BUY, SIGNAL_SELL] * 4
+        return _make_df(prices, signals=signals)
+
+    def test_enabled_cooldown_blocks_buy_and_logs_warning(self, caplog) -> None:
+        caplog.set_level(logging.WARNING, logger="backtest")
+        engine = BacktestEngine(
+            min_holding_bars=0,
+            max_trades_per_day=99,
+            stop_loss_pct=1.0,
+            max_consecutive_losses=3,
+            consecutive_loss_cooldown=24,
+            drawdown_breaker_enabled=False,
+        )
+
+        result = engine.run_backtest(self._losing_round_trips(), IdentityStrategy(), coin="TEST")
+
+        assert len(result.trades) == 6
+        assert "Consecutive loss limit (3) reached" in caplog.text
+
+    def test_disabled_cooldown_allows_buy_and_emits_no_warning(self, caplog) -> None:
+        caplog.set_level(logging.WARNING, logger="backtest")
+        engine = BacktestEngine(
+            min_holding_bars=0,
+            max_trades_per_day=99,
+            stop_loss_pct=1.0,
+            max_consecutive_losses=3,
+            consecutive_loss_cooldown=24,
+            drawdown_breaker_enabled=False,
+            loss_cooldown_enabled=False,
+        )
+
+        result = engine.run_backtest(self._losing_round_trips(), IdentityStrategy(), coin="TEST")
+
+        assert len(result.trades) == 8
+        assert "Consecutive loss limit" not in caplog.text
+        assert engine._consecutive_losses == 0
+        assert engine._loss_cooldown_until == -1
+
+
+# ---------------------------------------------------------------------------
 # Stop-loss
 # ---------------------------------------------------------------------------
 
@@ -183,9 +231,7 @@ class TestStopLoss:
         signals = [SIGNAL_BUY, 0, 0, 0, 0, 0]
         df = _make_df(prices, signals=signals)
 
-        engine = BacktestEngine(
-            initial_capital=10000, stop_loss_pct=0.05, min_holding_bars=0
-        )
+        engine = BacktestEngine(initial_capital=10000, stop_loss_pct=0.05, min_holding_bars=0)
         result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
 
         # Should have 1 buy + 1 forced sell
@@ -201,9 +247,7 @@ class TestStopLoss:
         signals = [SIGNAL_BUY, 0, 0, 0, 0, 0]
         df = _make_df(prices, signals=signals)
 
-        engine = BacktestEngine(
-            initial_capital=10000, stop_loss_pct=0.05, min_holding_bars=0
-        )
+        engine = BacktestEngine(initial_capital=10000, stop_loss_pct=0.05, min_holding_bars=0)
         result = engine.run_backtest(df, IdentityStrategy(), coin="TEST")
 
         # Only the buy + end-of-backtest forced sell (no stop-loss sell)
@@ -478,6 +522,10 @@ class TestDefaultParameters:
     def test_drawdown_breaker_enabled_by_default(self):
         engine = BacktestEngine()
         assert engine.drawdown_breaker_enabled is True
+
+    def test_loss_cooldown_enabled_by_default(self) -> None:
+        engine = BacktestEngine()
+        assert engine.loss_cooldown_enabled is True
 
     def test_legacy_positional_breaker_cooldown_argument_is_preserved(self):
         engine = BacktestEngine(

@@ -297,6 +297,7 @@ class BacktestEngine:
         stop_loss_pct: Per-trade stop-loss percentage (default 0.05 = 5%)
         max_drawdown_pct: Max drawdown circuit breaker percentage (default 0.20 = 20%)
         drawdown_breaker_enabled: Whether to enable the drawdown circuit breaker (default True)
+        loss_cooldown_enabled: Whether to pause entries after consecutive losses (default True)
         log_decisions: When True, append a per-bar decision row to ``BacktestResult.decision_log``
             (default False — skipped to avoid ~N dict allocations on long backtests).
 
@@ -310,6 +311,7 @@ class BacktestEngine:
         stop_loss_pct: Per-trade stop-loss threshold
         max_drawdown_pct: Drawdown circuit breaker threshold
         drawdown_breaker_enabled: Whether the drawdown circuit breaker is enabled
+        loss_cooldown_enabled: Whether consecutive-loss cooldown is enabled
         cash: Current cash
         position: Current position quantity
         position_value: Current position value
@@ -340,6 +342,7 @@ class BacktestEngine:
         consecutive_loss_cooldown: int = DEFAULT_CONSECUTIVE_LOSS_COOLDOWN,
         breaker_cooldown_bars: int = 0,
         drawdown_breaker_enabled: bool = True,
+        loss_cooldown_enabled: bool = True,
     ):
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
@@ -356,6 +359,7 @@ class BacktestEngine:
         self.consecutive_loss_cooldown = consecutive_loss_cooldown
         self.breaker_cooldown_bars = breaker_cooldown_bars
         self.drawdown_breaker_enabled = drawdown_breaker_enabled
+        self.loss_cooldown_enabled = loss_cooldown_enabled
 
         self.cash = initial_capital
         self.position = 0.0
@@ -379,8 +383,10 @@ class BacktestEngine:
         logger.info(f"   Max trades per day: {max_trades_per_day}")
         logger.info(f"   Stop-loss: {stop_loss_pct * 100:.1f}%")
         logger.info(
-            f"   Drawdown breaker: {'enabled' if drawdown_breaker_enabled else 'disabled'}"
+            f"   Consecutive-loss cooldown: "
+            f"{'enabled' if loss_cooldown_enabled else 'disabled'}"
         )
+        logger.info(f"   Drawdown breaker: {'enabled' if drawdown_breaker_enabled else 'disabled'}")
         if drawdown_breaker_enabled:
             logger.info(f"   Max drawdown: {max_drawdown_pct * 100:.1f}%")
         if use_atr_stop_loss:
@@ -442,7 +448,9 @@ class BacktestEngine:
             # Exponential moving average of true range, shifted to avoid look-ahead
             atr_raw = pd.Series(tr).ewm(span=atr_window, adjust=False).mean().shift(1).values
             atr_values = atr_raw
-            logger.info(f"   ATR stop-loss: enabled (multiplier={self.atr_stop_loss_multiplier}, window={atr_window})")
+            logger.info(
+                f"   ATR stop-loss: enabled (multiplier={self.atr_stop_loss_multiplier}, window={atr_window})"
+            )
 
         logger.info(f"Starting backtest for {coin}...")
         logger.info(f"   Strategy: {strategy.name}")
@@ -506,26 +514,27 @@ class BacktestEngine:
                     pre_sell_entry = entry_price
                     self._execute_sell(timestamp, price, coin, result, signal, force=True)
                     self._trades_today += 1
-                    # Track consecutive stop-losses for cooldown
-                    if price < pre_sell_entry:
-                        self._consecutive_losses += 1
-                        if self._consecutive_losses >= self.max_consecutive_losses:
-                            self._loss_cooldown_until = (
-                                i + self.consecutive_loss_cooldown
-                            )
-                            logger.warning(
-                                f"Consecutive loss limit ({self.max_consecutive_losses}) "
-                                f"reached, cooldown until bar {self._loss_cooldown_until}"
-                            )
+                    if self.loss_cooldown_enabled:
+                        # Track consecutive stop-losses for cooldown
+                        if price < pre_sell_entry:
+                            self._consecutive_losses += 1
+                            if self._consecutive_losses >= self.max_consecutive_losses:
+                                self._loss_cooldown_until = i + self.consecutive_loss_cooldown
+                                logger.warning(
+                                    f"Consecutive loss limit ({self.max_consecutive_losses}) "
+                                    f"reached, cooldown until bar {self._loss_cooldown_until}"
+                                )
+                                self._consecutive_losses = 0
+                        else:
                             self._consecutive_losses = 0
-                    else:
-                        self._consecutive_losses = 0
 
             can_sell = self._entry_bar < 0 or (i - self._entry_bar >= self.min_holding_bars)
 
             # Check loss cooldown before allowing new buy
             in_loss_cooldown = (
-                self._loss_cooldown_until >= 0 and i < self._loss_cooldown_until
+                self.loss_cooldown_enabled
+                and self._loss_cooldown_until >= 0
+                and i < self._loss_cooldown_until
             )
 
             if (
@@ -542,20 +551,19 @@ class BacktestEngine:
                 entry_price = self.position_value / self.position if self.position > 0 else 0
                 self._execute_sell(timestamp, price, coin, result, signal)
                 self._trades_today += 1
-                # Reset consecutive loss counter on profitable regular sell
-                if price >= entry_price:
-                    self._consecutive_losses = 0
-                else:
-                    self._consecutive_losses += 1
-                    if self._consecutive_losses >= self.max_consecutive_losses:
-                        self._loss_cooldown_until = (
-                            i + self.consecutive_loss_cooldown
-                        )
-                        logger.warning(
-                            f"Consecutive loss limit ({self.max_consecutive_losses}) "
-                            f"reached, cooldown until bar {self._loss_cooldown_until}"
-                        )
+                if self.loss_cooldown_enabled:
+                    # Reset consecutive loss counter on profitable regular sell
+                    if price >= entry_price:
                         self._consecutive_losses = 0
+                    else:
+                        self._consecutive_losses += 1
+                        if self._consecutive_losses >= self.max_consecutive_losses:
+                            self._loss_cooldown_until = i + self.consecutive_loss_cooldown
+                            logger.warning(
+                                f"Consecutive loss limit ({self.max_consecutive_losses}) "
+                                f"reached, cooldown until bar {self._loss_cooldown_until}"
+                            )
+                            self._consecutive_losses = 0
 
             # Record end-of-bar equity after all executions and their costs.
             total_value = self.cash + self.position * price
@@ -586,9 +594,7 @@ class BacktestEngine:
         result.equity_curve = pd.Series(equity_curve, index=timestamps)
         daily_equity = result.equity_curve.resample("1D").last().dropna()
         result.daily_returns = daily_equity.pct_change().dropna()
-        result.cumulative_returns = (
-            result.equity_curve / self.initial_capital - 1
-        ) * 100
+        result.cumulative_returns = (result.equity_curve / self.initial_capital - 1) * 100
 
         result.calculate_metrics()
 
