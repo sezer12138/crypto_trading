@@ -328,6 +328,8 @@ defaults.
 
 The drawdown circuit breaker remains enabled by default. Add `--disable-drawdown-breaker` only
 when intentionally comparing results without that portfolio-level risk control.
+The consecutive-loss cooldown is independent. Add `--disable-loss-cooldown` to stop counting
+consecutive losing exits, emitting its cooldown warning, and pausing new entries.
 
 Both built-in sides initially use the old symmetric grid's rank-one training result (`16`, `12`,
 `0.055`).
@@ -855,6 +857,7 @@ python run_backtest.py --source okx --coin btc --strategy ma_cross --no-viz
 | `--compare` | off | Compare all strategies |
 | `--no-viz` | off | Skip visualization charts |
 | `--disable-drawdown-breaker` | off | Disable maximum-drawdown forced liquidation and trading halt |
+| `--disable-loss-cooldown` | off | Disable entry pauses after consecutive losing trades |
 | `--source` | `binance` | Data source: binance or okx |
 
 ### Python API Usage
@@ -966,13 +969,14 @@ self.position = 0.0
 
 ### Risk Management
 
-The backtest engine includes four risk management controls, all configurable via constructor parameters:
+The backtest engine includes five risk management controls, all configurable via constructor parameters:
 
 | Control | Parameter | Default | Description |
 |---------|-----------|---------|-------------|
 | Min holding period | `min_holding_bars` | 5 | Minimum bars to hold before selling |
 | Max trades per day | `max_trades_per_day` | 6 | Hard cap on daily trade count |
 | Per-trade stop-loss | `stop_loss_pct` | 0.05 (5%) | Force-sell if unrealized loss exceeds threshold |
+| Consecutive-loss cooldown | `loss_cooldown_enabled`, `max_consecutive_losses`, `consecutive_loss_cooldown` | enabled; 3 losses; 24 bars | Pause new entries after consecutive losing exits |
 | Drawdown circuit breaker | `drawdown_breaker_enabled`, `max_drawdown_pct` | enabled; 0.20 (20%) | Force-liquidate and halt trading if total drawdown exceeds threshold |
 
 ```python
@@ -1003,6 +1007,23 @@ python run_backtest.py --compare --disable-drawdown-breaker
 
 Disabling this breaker does not disable stop-losses and does not remove the
 `max_drawdown_pct` performance metric.
+
+Disable consecutive-loss cooldown independently when comparing unrestricted strategy behavior:
+
+```python
+engine = BacktestEngine(
+    initial_capital=10000,
+    loss_cooldown_enabled=False,
+)
+```
+
+```bash
+python run_backtest.py --interval 5m --days 720 \
+  --disable-drawdown-breaker --disable-loss-cooldown --compare
+```
+
+This keeps per-position stop-losses active. The general warning about sub-hourly intervals also
+remains visible because it reports trading-frequency and transaction-cost risk, not loss cooldown.
 
 ### Performance Metrics
 

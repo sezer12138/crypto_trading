@@ -209,6 +209,7 @@ engine = BacktestEngine(
     slippage=0.001,          # 滑点
     position_size=0.95,      # 仓位比例
     drawdown_breaker_enabled=True,
+    loss_cooldown_enabled=True,
 )
 
 # 运行回测
@@ -230,7 +231,11 @@ result.save_logs('logs/backtest_decisions.json')
 
 ```bash
 python run_backtest.py --strategy momentum --disable-drawdown-breaker
+python run_backtest.py --interval 5m --days 720 \
+  --disable-drawdown-breaker --disable-loss-cooldown --compare
 ```
+
+`--disable-loss-cooldown` 只关闭连续亏损计数、冷却 warning 和暂停开仓；单笔止损仍然有效。5分钟等小时以下周期的通用交易成本 warning 与该机制无关，因此仍会显示。
 
 **决策日志结构：**
 ```json
