@@ -38,6 +38,15 @@ OKX_INTERVALS = {
     "1d": "1D",
 }
 
+INTERVAL_MINUTES = {
+    "1m": 1,
+    "5m": 5,
+    "15m": 15,
+    "1h": 60,
+    "4h": 240,
+    "1d": 1440,
+}
+
 OKX_BASE_URL = "https://www.okx.com/api/v5"
 
 
@@ -82,8 +91,11 @@ class HistoricalDataFetcher:
 
         if not self.verify_ssl:
             import urllib3
+
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            logger.warning("SSL verification disabled (CRYPTO_DISABLE_SSL=1), ensure network environment is secure")
+            logger.warning(
+                "SSL verification disabled (CRYPTO_DISABLE_SSL=1), ensure network environment is secure"
+            )
 
     def fetch_okx_candles(
         self,
@@ -116,8 +128,11 @@ class HistoricalDataFetcher:
         for attempt in range(self.max_retries):
             try:
                 response = requests.get(
-                    url, params=params, timeout=30,
-                    verify=self.verify_ssl, proxies=self.proxies,
+                    url,
+                    params=params,
+                    timeout=30,
+                    verify=self.verify_ssl,
+                    proxies=self.proxies,
                 )
                 response.raise_for_status()
                 result = response.json()
@@ -135,10 +150,20 @@ class HistoricalDataFetcher:
 
                 # OKX returns: [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm]
                 # Data is reverse chronological (newest first)
-                df = pd.DataFrame(data, columns=[
-                    "timestamp", "open", "high", "low", "close",
-                    "volume", "vol_ccy", "vol_ccy_quote", "confirm",
-                ])
+                df = pd.DataFrame(
+                    data,
+                    columns=[
+                        "timestamp",
+                        "open",
+                        "high",
+                        "low",
+                        "close",
+                        "volume",
+                        "vol_ccy",
+                        "vol_ccy_quote",
+                        "confirm",
+                    ],
+                )
 
                 numeric_cols = ["open", "high", "low", "close", "volume"]
                 for col in numeric_cols:
@@ -157,7 +182,7 @@ class HistoricalDataFetcher:
             except requests.exceptions.RequestException as e:
                 logger.warning(f"OKX request error (attempt {attempt + 1}/{self.max_retries}): {e}")
                 if attempt < self.max_retries - 1:
-                    sleep_time = self.retry_delay * (2 ** attempt) + random.uniform(0, 1)
+                    sleep_time = self.retry_delay * (2**attempt) + random.uniform(0, 1)
                     logger.info(f"Retrying in {sleep_time:.1f} seconds...")
                     time.sleep(sleep_time)
                 else:
@@ -203,7 +228,9 @@ class HistoricalDataFetcher:
         # Retry mechanism
         for attempt in range(self.max_retries):
             try:
-                response = requests.get(url, params=params, timeout=30, verify=self.verify_ssl, proxies=self.proxies)
+                response = requests.get(
+                    url, params=params, timeout=30, verify=self.verify_ssl, proxies=self.proxies
+                )
                 response.raise_for_status()
                 data = response.json()
 
@@ -216,16 +243,31 @@ class HistoricalDataFetcher:
                 df = pd.DataFrame(
                     data,
                     columns=[
-                        "timestamp", "open", "high", "low", "close", "volume",
-                        "close_time", "quote_volume", "trades",
-                        "taker_buy_base", "taker_buy_quote", "ignore",
+                        "timestamp",
+                        "open",
+                        "high",
+                        "low",
+                        "close",
+                        "volume",
+                        "close_time",
+                        "quote_volume",
+                        "trades",
+                        "taker_buy_base",
+                        "taker_buy_quote",
+                        "ignore",
                     ],
                 )
 
                 # Type conversion
                 numeric_cols = [
-                    "open", "high", "low", "close", "volume",
-                    "quote_volume", "taker_buy_base", "taker_buy_quote",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "quote_volume",
+                    "taker_buy_base",
+                    "taker_buy_quote",
                 ]
                 for col in numeric_cols:
                     df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -243,7 +285,7 @@ class HistoricalDataFetcher:
             except requests.exceptions.SSLError as e:
                 logger.warning(f"SSL error (attempt {attempt + 1}/{self.max_retries}): {e}")
                 if attempt < self.max_retries - 1:
-                    sleep_time = self.retry_delay * (2 ** attempt) + random.uniform(0, 1)
+                    sleep_time = self.retry_delay * (2**attempt) + random.uniform(0, 1)
                     logger.info(f"Retrying in {sleep_time:.1f} seconds...")
                     time.sleep(sleep_time)
                 else:
@@ -253,11 +295,13 @@ class HistoricalDataFetcher:
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Request error (attempt {attempt + 1}/{self.max_retries}): {e}")
                 if attempt < self.max_retries - 1:
-                    sleep_time = self.retry_delay * (2 ** attempt) + random.uniform(0, 1)
+                    sleep_time = self.retry_delay * (2**attempt) + random.uniform(0, 1)
                     logger.info(f"Retrying in {sleep_time:.1f} seconds...")
                     time.sleep(sleep_time)
                 else:
-                    logger.error(f"Failed to fetch {symbol} data (request error, max retries reached)")
+                    logger.error(
+                        f"Failed to fetch {symbol} data (request error, max retries reached)"
+                    )
                     return pd.DataFrame()
 
             except Exception as e:
@@ -307,8 +351,7 @@ class HistoricalDataFetcher:
         end_time = datetime.now()
         start_time = end_time - timedelta(days=days)
 
-        interval_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
-        minutes = interval_minutes.get(interval, 60)
+        minutes = INTERVAL_MINUTES.get(interval, 60)
         expected_records = int((days * 24 * 60) / minutes)
 
         logger.info(f"Starting to fetch {coin.upper()} historical data from OKX...")
@@ -382,10 +425,14 @@ class HistoricalDataFetcher:
         actual_records = len(final_df)
         data_ratio = actual_records / expected_records
 
-        logger.info(f"Fetched {actual_records} records in total (expected {expected_records}, completeness {data_ratio*100:.1f}%)")
+        logger.info(
+            f"Fetched {actual_records} records in total (expected {expected_records}, completeness {data_ratio*100:.1f}%)"
+        )
 
         if data_ratio < min_data_ratio:
-            logger.warning(f"Data incomplete! Only fetched {data_ratio*100:.1f}% of data, recommend re-fetching")
+            logger.warning(
+                f"Data incomplete! Only fetched {data_ratio*100:.1f}% of data, recommend re-fetching"
+            )
         else:
             logger.info("Data completeness check passed")
 
@@ -410,8 +457,8 @@ class HistoricalDataFetcher:
         end_time = datetime.now()
         start_time = end_time - timedelta(days=days)
 
-        interval_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
-        minutes = interval_minutes.get(interval, 60)
+        minutes = INTERVAL_MINUTES.get(interval, 60)
+        candle_duration = timedelta(minutes=minutes)
         expected_records = int((days * 24 * 60) / minutes)
 
         logger.info(f"Starting to fetch {coin.upper()} historical data from Binance...")
@@ -425,7 +472,7 @@ class HistoricalDataFetcher:
         max_failed_attempts = 5
 
         while current_start < end_time:
-            batch_end = min(current_start + timedelta(hours=1000), end_time)
+            batch_end = min(current_start + candle_duration * 1000, end_time)
 
             df = self.fetch_binance_klines(
                 symbol=symbol,
@@ -443,14 +490,13 @@ class HistoricalDataFetcher:
                     logger.error(f"Consecutive {max_failed_attempts} fetch failures, stopping")
                     break
 
-                current_start = batch_end
                 time.sleep(self.retry_delay)
                 continue
 
             failed_attempts = 0
             all_data.append(df)
 
-            current_start = df.index[-1] + timedelta(hours=1)
+            current_start = df.index[-1] + candle_duration
 
             # Rate limit prevention
             time.sleep(0.5)
@@ -466,15 +512,23 @@ class HistoricalDataFetcher:
         final_df = pd.concat(all_data)
         final_df = final_df[~final_df.index.duplicated(keep="first")]
         final_df.sort_index(inplace=True)
+        final_df = final_df.loc[
+            (final_df.index >= pd.Timestamp(start_time))
+            & (final_df.index <= pd.Timestamp(end_time))
+        ]
 
         # Validate data completeness
         actual_records = len(final_df)
         data_ratio = actual_records / expected_records
 
-        logger.info(f"Fetched {actual_records} records in total (expected {expected_records}, completeness {data_ratio*100:.1f}%)")
+        logger.info(
+            f"Fetched {actual_records} records in total (expected {expected_records}, completeness {data_ratio*100:.1f}%)"
+        )
 
         if data_ratio < min_data_ratio:
-            logger.warning(f"Data incomplete! Only fetched {data_ratio*100:.1f}% of data, recommend re-fetching")
+            logger.warning(
+                f"Data incomplete! Only fetched {data_ratio*100:.1f}% of data, recommend re-fetching"
+            )
         else:
             logger.info("Data completeness check passed")
 
