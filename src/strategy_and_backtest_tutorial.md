@@ -50,7 +50,9 @@ The system follows a four-layer pipeline:
 Data Layer --> Strategy Layer --> Backtest Layer --> Visualization Layer
 ```
 
-1. **Data Layer** (`src/historical_data.py`) fetches OHLCV candles from Binance or OKX.
+1. **Data Layer** (`src/historical_data.py`) fetches OHLCV candles from Binance or OKX. Binance
+   pagination resumes at exactly one candle after the last returned timestamp and retries the same
+   window after an empty response, preventing interval-dependent gaps in sub-hourly data.
 2. **Strategy Layer** (`src/strategies/`) computes technical indicators and emits buy/sell signals.
 3. **Backtest Layer** (`src/backtest.py`) simulates trading with commission, slippage, and risk controls.
 4. **Visualization Layer** (`src/visualization/`) renders equity curves, comparison charts, and HTML reports.
@@ -330,6 +332,27 @@ The drawdown circuit breaker remains enabled by default. Add `--disable-drawdown
 when intentionally comparing results without that portfolio-level risk control.
 The consecutive-loss cooldown is independent. Add `--disable-loss-cooldown` to stop counting
 consecutive losing exits, emitting its cooldown warning, and pausing new entries.
+
+For the expanded BTC 5-minute, 1,800-day experiment, pass raw candle counts explicitly and match
+the risk-control settings used by the comparison backtest:
+
+```bash
+python -u scripts/grid_search_momentum.py \
+  --data data/historical/btc_5m_1800d.csv \
+  --roc-periods 12,24,48,96,192,432,864,1440,2016,2880,4032 \
+  --momentum-periods 6,12,24,48,96,192,432,864,1440,2016 \
+  --thresholds 0.005,0.01,0.02,0.035,0.055,0.08,0.12,0.16,0.20 \
+  --train-ratio 0.7 \
+  --coin btc \
+  --disable-drawdown-breaker \
+  --disable-loss-cooldown \
+  --output results/momentum_grid_search_btc_1800d_5m_expanded.csv
+```
+
+This grid contains 990 buy triples. The second stage evaluates the five retained buy candidates
+against all 990 sell triples, for 5,940 primary backtests before stability and validation checks.
+Because both risk controls are disabled here, the resulting metrics are directly comparable with
+a `run_backtest.py` command using the same two flags.
 
 Both built-in sides initially use the old symmetric grid's rank-one training result (`16`, `12`,
 `0.055`).
