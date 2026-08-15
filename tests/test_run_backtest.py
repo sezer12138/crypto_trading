@@ -51,7 +51,7 @@ def test_create_strategy_applies_matching_momentum_profile(monkeypatch):
     assert strategy.sell_threshold == 0.045
 
 
-def test_create_strategy_uses_experimental_btc_5m_profile():
+def test_create_strategy_uses_expanded_search_btc_5m_profile():
     from strategies.momentum_profiles import get_momentum_profile
 
     assert get_momentum_profile("btc", "5m")
@@ -66,7 +66,7 @@ def test_create_strategy_uses_experimental_btc_5m_profile():
         strategy.sell_roc_period,
         strategy.sell_momentum_period,
         strategy.sell_threshold,
-    ) == (48, 48, 0.055, 144, 12, 0.055)
+    ) == (4032, 12, 0.055, 48, 864, 0.035)
 
 
 def test_create_strategy_uses_explicit_btc_1h_profile():

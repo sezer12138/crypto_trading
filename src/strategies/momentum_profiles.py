@@ -15,15 +15,15 @@ class MomentumProfile(TypedDict, total=False):
 
 
 MOMENTUM_PROFILES: Dict[Tuple[str, str], MomentumProfile] = {
-    # Explicit experimental override: ranked first on BTC/5m training data but did not
-    # complete a round trip in every stability slice.
+    # Explicit experimental override from the expanded BTC/5m 1,800-day search.
+    # It ranked first on training stability but failed the validation adoption guard.
     ("btc", "5m"): {
-        "buy_roc_period": 48,
-        "buy_momentum_period": 48,
+        "buy_roc_period": 4032,
+        "buy_momentum_period": 12,
         "buy_threshold": 0.055,
-        "sell_roc_period": 144,
-        "sell_momentum_period": 12,
-        "sell_threshold": 0.055,
+        "sell_roc_period": 48,
+        "sell_momentum_period": 864,
+        "sell_threshold": 0.035,
     },
     # Previous BTC/1h defaults made explicit for interval-aware runtime resolution.
     ("btc", "1h"): {
