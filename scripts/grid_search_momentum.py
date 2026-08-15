@@ -195,12 +195,14 @@ def _run_combination(
     capital: float,
     drawdown_breaker_enabled: bool,
     coin: str,
+    loss_cooldown_enabled: bool = True,
 ) -> Dict[str, float]:
     """Run one Momentum combination and return parameters plus training metrics."""
     strategy = MomentumStrategy(**parameters)
     engine = BacktestEngine(
         initial_capital=capital,
         drawdown_breaker_enabled=drawdown_breaker_enabled,
+        loss_cooldown_enabled=loss_cooldown_enabled,
     )
     result = engine.run_backtest(train_df, strategy, coin=coin)
     row = parameters.copy()
@@ -216,6 +218,7 @@ def evaluate_buy_grid(
     capital: float,
     drawdown_breaker_enabled: bool,
     coin: str,
+    loss_cooldown_enabled: bool = True,
 ) -> pd.DataFrame:
     """Backtest every buy combination with fixed default sell parameters."""
     rows = []
@@ -230,7 +233,16 @@ def evaluate_buy_grid(
             "sell_momentum_period": DEFAULT_MOMENTUM_SELL_PERIOD,
             "sell_threshold": DEFAULT_MOMENTUM_SELL_THRESHOLD,
         }
-        rows.append(_run_combination(train_df, parameters, capital, drawdown_breaker_enabled, coin))
+        rows.append(
+            _run_combination(
+                train_df,
+                parameters,
+                capital,
+                drawdown_breaker_enabled,
+                coin,
+                loss_cooldown_enabled,
+            )
+        )
     return pd.DataFrame(rows)
 
 
@@ -261,6 +273,7 @@ def evaluate_sell_grid(
     capital: float,
     drawdown_breaker_enabled: bool,
     coin: str,
+    loss_cooldown_enabled: bool = True,
 ) -> pd.DataFrame:
     """Backtest each retained buy triple against every sell combination."""
     rows = []
@@ -277,7 +290,14 @@ def evaluate_sell_grid(
                 "sell_threshold": threshold,
             }
             rows.append(
-                _run_combination(train_df, parameters, capital, drawdown_breaker_enabled, coin)
+                _run_combination(
+                    train_df,
+                    parameters,
+                    capital,
+                    drawdown_breaker_enabled,
+                    coin,
+                    loss_cooldown_enabled,
+                )
             )
     return pd.DataFrame(rows)
 
@@ -306,6 +326,7 @@ def evaluate_stability(
     capital: float,
     drawdown_breaker_enabled: bool,
     coin: str,
+    loss_cooldown_enabled: bool = True,
 ) -> pd.DataFrame:
     """Evaluate shortlisted candidates across chronological stability slices."""
     rows = []
@@ -321,7 +342,12 @@ def evaluate_stability(
         round_trips = []
         for number, data_slice in enumerate(slices, start=1):
             metrics = _run_combination(
-                data_slice, parameters, capital, drawdown_breaker_enabled, coin
+                data_slice,
+                parameters,
+                capital,
+                drawdown_breaker_enabled,
+                coin,
+                loss_cooldown_enabled,
             )
             total_return = float(metrics["train_total_return_pct"])
             trades = int(metrics["train_total_trades"])
@@ -401,6 +427,7 @@ def validate_winner(
     capital: float,
     drawdown_breaker_enabled: bool,
     coin: str,
+    loss_cooldown_enabled: bool = True,
 ) -> Dict[str, float]:
     """Evaluate only the highest-ranked training setting on validation data."""
     winner = ranked_results.iloc[0]
@@ -415,6 +442,7 @@ def validate_winner(
     engine = BacktestEngine(
         initial_capital=capital,
         drawdown_breaker_enabled=drawdown_breaker_enabled,
+        loss_cooldown_enabled=loss_cooldown_enabled,
     )
     result = engine.run_backtest(validation_df, strategy, coin=coin)
     return _prefixed_metrics(result.metrics, "validation")
@@ -432,12 +460,14 @@ def validate_current_profile(
     drawdown_breaker_enabled: bool,
     coin: str,
     interval: str,
+    loss_cooldown_enabled: bool = True,
 ) -> Dict[str, float]:
     """Evaluate the currently resolved runtime profile on validation data."""
     strategy = MomentumStrategy(**get_momentum_profile(coin, interval))
     engine = BacktestEngine(
         initial_capital=capital,
         drawdown_breaker_enabled=drawdown_breaker_enabled,
+        loss_cooldown_enabled=loss_cooldown_enabled,
     )
     result = engine.run_backtest(validation_df, strategy, coin=coin)
     return _prefixed_metrics(result.metrics, "validation")
@@ -485,6 +515,11 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Disable forced liquidation and halt at the maximum drawdown threshold",
     )
+    parser.add_argument(
+        "--disable-loss-cooldown",
+        action="store_true",
+        help="Disable pausing new entries after consecutive losing trades",
+    )
     return parser.parse_args(argv)
 
 
@@ -513,6 +548,7 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
     max_lookback = max(max(roc_periods), max(momentum_periods))
     train, validation = chronological_split(data, args.train_ratio, max_lookback)
     breaker_enabled = not args.disable_drawdown_breaker
+    loss_cooldown_enabled = not args.disable_loss_cooldown
 
     grid_size = len(roc_periods) * len(momentum_periods) * len(thresholds)
     retained_count = min(TOP_BUY_CANDIDATES, grid_size)
@@ -535,6 +571,7 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
             args.capital,
             breaker_enabled,
             args.coin.upper(),
+            loss_cooldown_enabled,
         )
         buy_candidates = select_top_buy_candidates(buy_results)
         training_results = evaluate_sell_grid(
@@ -546,6 +583,7 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
             args.capital,
             breaker_enabled,
             args.coin.upper(),
+            loss_cooldown_enabled,
         )
         ranked = rank_results(training_results)
         shortlist = ranked.head(STABILITY_SHORTLIST_SIZE).copy()
@@ -556,6 +594,7 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
             args.capital,
             breaker_enabled,
             args.coin.upper(),
+            loss_cooldown_enabled,
         )
         stable_ranked = rank_stable_candidates(stability_results)
 
@@ -576,6 +615,7 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
             args.capital,
             breaker_enabled,
             args.coin.upper(),
+            loss_cooldown_enabled,
         )
         baseline_metrics = validate_current_profile(
             validation,
@@ -583,6 +623,7 @@ def run_search(args: argparse.Namespace) -> pd.DataFrame:
             breaker_enabled,
             args.coin.upper(),
             _interval_label(interval_minutes),
+            loss_cooldown_enabled,
         )
 
     inactive = stability_results.loc[~stability_results["stability_eligible"].astype(bool)].copy()

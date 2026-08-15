@@ -24,6 +24,7 @@ from scripts.grid_search_momentum import (
     resolve_search_ranges,
     select_top_buy_candidates,
     split_stability_slices,
+    validate_current_profile,
     validate_winner,
     write_results,
 )
@@ -232,6 +233,7 @@ def test_evaluate_buy_grid_runs_every_combination_with_fixed_sell_defaults(monke
         capital=12345.0,
         drawdown_breaker_enabled=False,
         coin="BTC",
+        loss_cooldown_enabled=False,
     )
 
     assert len(results) == 8
@@ -242,6 +244,7 @@ def test_evaluate_buy_grid_runs_every_combination_with_fixed_sell_defaults(monke
     assert len(engines) == 8
     assert all(engine.kwargs["initial_capital"] == 12345.0 for engine in engines)
     assert all(engine.kwargs["drawdown_breaker_enabled"] is False for engine in engines)
+    assert all(engine.kwargs["loss_cooldown_enabled"] is False for engine in engines)
     assert set(results.columns) == {
         "buy_roc_period",
         "buy_momentum_period",
@@ -418,7 +421,17 @@ def test_evaluate_stability_compounds_returns_and_counts_round_trips(monkeypatch
     returns = {1: 10.0, 2: -5.0, 3: 2.0}
     trades = {1: 2, 2: 4, 3: 2}
 
-    def fake_run(data, parameters, capital, drawdown_breaker_enabled, coin):
+    cooldown_settings = []
+
+    def fake_run(
+        data,
+        parameters,
+        capital,
+        drawdown_breaker_enabled,
+        coin,
+        loss_cooldown_enabled=True,
+    ):
+        cooldown_settings.append(loss_cooldown_enabled)
         number = data.attrs["slice_number"]
         return {
             **parameters,
@@ -430,13 +443,16 @@ def test_evaluate_stability_compounds_returns_and_counts_round_trips(monkeypatch
 
     monkeypatch.setattr(search, "_run_combination", fake_run)
 
-    evaluated = evaluate_stability(candidate, slices, 10000.0, False, "BTC")
+    evaluated = evaluate_stability(
+        candidate, slices, 10000.0, False, "BTC", loss_cooldown_enabled=False
+    )
     row = evaluated.iloc[0]
 
     assert row["stability_total_return_pct"] == pytest.approx(6.59)
     assert row["stability_worst_return_pct"] == -5.0
     assert row["stability_total_round_trips"] == 4
     assert bool(row["stability_eligible"]) is True
+    assert cooldown_settings == [False, False, False]
 
 
 def test_rank_stable_candidates_excludes_inactive_candidate():
@@ -570,10 +586,17 @@ def test_validate_winner_runs_only_best_setting(monkeypatch):
     )
 
     metrics = validate_winner(
-        _ohlcv_frame(40), ranked, capital=10000.0, drawdown_breaker_enabled=True, coin="BTC"
+        _ohlcv_frame(40),
+        ranked,
+        capital=10000.0,
+        drawdown_breaker_enabled=False,
+        coin="BTC",
+        loss_cooldown_enabled=False,
     )
 
     assert [call[0] for call in calls] == ["engine", "run"]
+    assert calls[0][1]["drawdown_breaker_enabled"] is False
+    assert calls[0][1]["loss_cooldown_enabled"] is False
     assert calls[1][1:] == (5, 10, 0.01, 7, 12, 0.03)
     assert metrics["validation_total_return_pct"] == 12.0
     assert set(metrics) == {
@@ -586,6 +609,34 @@ def test_validate_winner_runs_only_best_setting(monkeypatch):
     }
 
 
+def test_validate_current_profile_forwards_disabled_risk_controls(monkeypatch):
+    import scripts.grid_search_momentum as search
+
+    captured = {}
+
+    class FakeEngine:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def run_backtest(self, df, strategy, coin):
+            return _FakeResult()
+
+    monkeypatch.setattr(search, "BacktestEngine", FakeEngine)
+
+    metrics = validate_current_profile(
+        _ohlcv_frame(40),
+        capital=10000.0,
+        drawdown_breaker_enabled=False,
+        coin="BTC",
+        interval="5m",
+        loss_cooldown_enabled=False,
+    )
+
+    assert captured["drawdown_breaker_enabled"] is False
+    assert captured["loss_cooldown_enabled"] is False
+    assert metrics["validation_total_return_pct"] == 12.0
+
+
 def test_parse_arguments_has_expected_defaults():
     args = parse_arguments([])
 
@@ -595,6 +646,7 @@ def test_parse_arguments_has_expected_defaults():
     assert args.train_ratio == 0.7
     assert args.capital == 10000.0
     assert args.disable_drawdown_breaker is False
+    assert args.disable_loss_cooldown is False
 
 
 def test_parse_arguments_accepts_overrides(tmp_path):
@@ -617,6 +669,7 @@ def test_parse_arguments_accepts_overrides(tmp_path):
             "--coin",
             "ETH",
             "--disable-drawdown-breaker",
+            "--disable-loss-cooldown",
         ]
     )
 
@@ -627,6 +680,7 @@ def test_parse_arguments_accepts_overrides(tmp_path):
     assert args.capital == 5000.0
     assert args.coin == "ETH"
     assert args.disable_drawdown_breaker is True
+    assert args.disable_loss_cooldown is True
 
 
 def test_write_results_populates_validation_only_for_winner(tmp_path):
