@@ -100,7 +100,10 @@ def suggest_momentum_parameters(trial: Trial, bounds: SearchBounds) -> dict[str,
 def score_folds(folds: Sequence[FoldMetrics], config: LossConfig) -> TrialEvaluation:
     """Compute the specified robust loss from independent fold metrics."""
     annual = [item.annual_return_pct for item in folds]
-    if not folds or not all(math.isfinite(value) for value in annual):
+    if not folds or not all(
+        math.isfinite(item.annual_return_pct) and math.isfinite(item.max_drawdown_pct)
+        for item in folds
+    ):
         raise ValueError("Fold metrics must be finite")
     robust = statistics.median(annual)
     worst = max(abs(item.max_drawdown_pct) for item in folds)

@@ -63,6 +63,22 @@ def test_score_folds_combines_all_penalties() -> None:
     assert result.loss == pytest.approx(65.5901699)
 
 
+def test_score_folds_rejects_non_finite_annual_return() -> None:
+    """Rejects a fold whose annual return cannot produce a valid loss."""
+    folds = [FoldMetrics(float("nan"), -20.0, 4)]
+
+    with pytest.raises(ValueError, match="Fold metrics must be finite"):
+        score_folds(folds, LossConfig())
+
+
+def test_score_folds_rejects_non_finite_drawdown() -> None:
+    """Rejects a fold whose drawdown cannot produce a valid loss."""
+    folds = [FoldMetrics(20.0, float("inf"), 4)]
+
+    with pytest.raises(ValueError, match="Fold metrics must be finite"):
+        score_folds(folds, LossConfig())
+
+
 def test_suggestions_use_independent_logarithmic_buy_and_sell_parameters() -> None:
     """Suggests all six Momentum inputs independently with logarithmic sampling."""
     bounds = SearchBounds(12, 8064, 6, 4032, 0.005, 0.25)
