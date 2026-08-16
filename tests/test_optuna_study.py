@@ -2,6 +2,7 @@
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import optuna
@@ -50,6 +51,22 @@ def test_matching_metadata_resumes_and_mismatch_fails(tmp_path: Path) -> None:
     assert len(resumed.trials) == 1
     with pytest.raises(ValueError, match="metadata does not match"):
         create_or_load_study(path, "momentum", {"schema": 2}, 42, 5, False)
+
+
+def test_metadata_free_study_with_trials_cannot_be_adopted(tmp_path: Path) -> None:
+    """Rejects legacy trial evidence that cannot be proved compatible with this run."""
+    path = tmp_path / "study.db"
+    legacy = optuna.create_study(
+        study_name="momentum",
+        storage=f"sqlite:///{path.resolve()}",
+        direction="minimize",
+    )
+    trial = legacy.ask()
+    trial.suggest_int("x", 1, 2)
+    legacy.tell(trial, 1.0)
+
+    with pytest.raises(ValueError, match="metadata is missing"):
+        create_or_load_study(path, "momentum", {"schema": 1}, 42, 5, False)
 
 
 def test_recover_stale_trials_marks_running_trials_failed(tmp_path: Path) -> None:
@@ -119,7 +136,93 @@ def test_build_metadata_records_the_full_immutable_run_identity(tmp_path: Path) 
             "loss_cooldown_enabled": True,
         },
     }
-    json.dumps(metadata)
+    json.dumps(metadata, allow_nan=False)
+
+
+def test_build_metadata_normalizes_coin_identity(tmp_path: Path) -> None:
+    """Stores a canonical uppercase coin while preserving a matching run configuration."""
+    data_path = tmp_path / "ohlcv.csv"
+    data_path.write_text("timestamp,open,high,low,close,volume\n", encoding="utf-8")
+    data = pd.DataFrame(
+        {"close": [100.0, 101.0, 102.0]},
+        index=pd.date_range("2024-01-01", periods=3, freq="h"),
+    )
+
+    metadata = build_metadata(
+        data_path,
+        data,
+        60,
+        "btc",
+        10_000.0,
+        _bounds(),
+        LossConfig(),
+        0.2,
+        4,
+        BacktestRunConfig(10_000.0, "btc", False, True),
+    )
+
+    assert metadata["coin"] == "BTC"
+
+
+@pytest.mark.parametrize(
+    ("coin", "capital", "run_config"),
+    [
+        ("ETH", 10_000.0, BacktestRunConfig(10_000.0, "BTC", False, True)),
+        ("BTC", 5_000.0, BacktestRunConfig(10_000.0, "BTC", False, True)),
+    ],
+)
+def test_build_metadata_rejects_identity_mismatch(
+    tmp_path: Path,
+    coin: str,
+    capital: float,
+    run_config: BacktestRunConfig,
+) -> None:
+    """Rejects metadata inputs that would misdescribe the executed backtests."""
+    data_path = tmp_path / "ohlcv.csv"
+    data_path.write_text("timestamp,open,high,low,close,volume\n", encoding="utf-8")
+    data = pd.DataFrame(
+        {"close": [100.0, 101.0, 102.0]},
+        index=pd.date_range("2024-01-01", periods=3, freq="h"),
+    )
+
+    with pytest.raises(ValueError, match="must match the backtest run configuration"):
+        build_metadata(
+            data_path,
+            data,
+            60,
+            coin,
+            capital,
+            _bounds(),
+            LossConfig(),
+            0.2,
+            4,
+            run_config,
+        )
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")])
+def test_build_metadata_rejects_non_finite_values(tmp_path: Path, invalid: float) -> None:
+    """Prevents non-finite capital from entering persistent JSON metadata."""
+    data_path = tmp_path / "ohlcv.csv"
+    data_path.write_text("timestamp,open,high,low,close,volume\n", encoding="utf-8")
+    data = pd.DataFrame(
+        {"close": [100.0, 101.0, 102.0]},
+        index=pd.date_range("2024-01-01", periods=3, freq="h"),
+    )
+
+    with pytest.raises(ValueError, match="finite"):
+        build_metadata(
+            data_path,
+            data,
+            60,
+            "BTC",
+            invalid,
+            _bounds(),
+            LossConfig(),
+            0.2,
+            4,
+            BacktestRunConfig(invalid, "BTC", False, True),
+        )
 
 
 def test_record_evaluation_stores_json_serializable_aggregate_and_fold_metrics(
@@ -141,4 +244,16 @@ def test_record_evaluation_stores_json_serializable_aggregate_and_fold_metrics(
             {"annual_return_pct": 15.0, "max_drawdown_pct": -18.0, "total_trades": 2},
         ],
     }
-    json.dumps(trial.user_attrs)
+    json.dumps(trial.user_attrs, allow_nan=False)
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")])
+def test_record_evaluation_rejects_non_finite_values(tmp_path: Path, invalid: float) -> None:
+    """Prevents non-finite aggregate evaluation values from entering trial attributes."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {"schema": 1}, 42, 5, False)
+    trial = study.ask()
+
+    with pytest.raises(ValueError, match="finite"):
+        record_evaluation(trial, replace(_evaluation(), robust_annual_return_pct=invalid))
+
+    assert trial.user_attrs == {}
