@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, TypeVar
 
 import pandas as pd
-import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from backtest import BacktestEngine
+from optimization.data import infer_interval_minutes, load_ohlcv
 from strategies.momentum import MomentumStrategy
 from strategies.momentum_profiles import get_momentum_profile
 from strategies.constants import (
@@ -25,7 +25,6 @@ from strategies.constants import (
     DEFAULT_MOMENTUM_SELL_THRESHOLD,
 )
 
-REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
 Number = TypeVar("Number", int, float)
 METRIC_NAMES = (
     "total_return_pct",
@@ -95,34 +94,6 @@ def parse_float_list(value: str) -> List[float]:
     return _parse_positive_list(value, float, "Floating-point parameters")
 
 
-def load_ohlcv(path: Path) -> pd.DataFrame:
-    """Load, validate, and chronologically sort an OHLCV CSV file."""
-    data = pd.read_csv(path)
-    if "timestamp" not in data.columns:
-        raise ValueError("Input data is missing required column: timestamp")
-
-    missing = [column for column in REQUIRED_COLUMNS if column not in data.columns]
-    if missing:
-        raise ValueError(f"Input data is missing required columns: {', '.join(missing)}")
-
-    try:
-        data["timestamp"] = pd.to_datetime(data["timestamp"], errors="raise")
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Input data contains an invalid timestamp") from exc
-    if data["timestamp"].duplicated().any():
-        raise ValueError("Input data contains duplicate timestamps")
-
-    try:
-        for column in REQUIRED_COLUMNS:
-            data[column] = pd.to_numeric(data[column], errors="raise")
-    except (TypeError, ValueError) as exc:
-        raise ValueError("OHLCV columns must contain numeric values") from exc
-    if not np.isfinite(data.loc[:, list(REQUIRED_COLUMNS)].to_numpy(dtype=float)).all():
-        raise ValueError("OHLCV columns must contain finite numeric values")
-
-    return data.set_index("timestamp").loc[:, list(REQUIRED_COLUMNS)].sort_index()
-
-
 def chronological_split(
     df: pd.DataFrame, train_ratio: float, max_lookback: int
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -135,20 +106,6 @@ def chronological_split(
     if len(train) <= max_lookback or len(validation) <= max_lookback:
         raise ValueError("Train and validation partitions must exceed the maximum lookback")
     return train, validation
-
-
-def infer_interval_minutes(index: pd.DatetimeIndex) -> int:
-    """Infer the dominant positive whole-minute candle cadence."""
-    if len(index) < 3:
-        raise ValueError("At least three timestamps are required to infer candle cadence")
-    deltas = index.to_series().diff().dropna().dt.total_seconds() / 60
-    valid = deltas[(deltas > 0) & (deltas % 1 == 0)].astype(int)
-    if len(valid) != len(deltas):
-        raise ValueError("Timestamps must have a positive whole-minute cadence")
-    counts = valid.value_counts()
-    if counts.empty or int(counts.iloc[0]) <= len(valid) / 2:
-        raise ValueError("Timestamps do not have a dominant candle cadence")
-    return int(counts.index[0])
 
 
 def _hours_to_bars(hours: Sequence[int], interval_minutes: int) -> List[int]:
