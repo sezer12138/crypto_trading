@@ -4,6 +4,8 @@ from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wai
 from dataclasses import asdict, dataclass
 import math
 from pathlib import Path
+import signal
+import threading
 from typing import Callable, TypeAlias
 
 import optuna
@@ -163,12 +165,11 @@ def run_sequential_trials(
     evaluator: Callable[[dict[str, int | float]], TrialEvaluation],
 ) -> RunSummary:
     """Evaluate trials sequentially until the study reaches the terminal target."""
-    initial_running = _running_trial_numbers(study)
     interrupted = False
     pending_error: BaseException | None = None
     try:
         while terminal_trial_count(study) < target_trials:
-            trial = study.ask()
+            trial = _ask_owned_trial(study)
             try:
                 parameters = suggest_momentum_parameters(trial, bounds)
                 evaluation = evaluator(parameters)
@@ -185,9 +186,6 @@ def run_sequential_trials(
         interrupted = True
     except BaseException as exc:
         pending_error = exc
-    finally:
-        if interrupted or pending_error is not None:
-            interrupted = _fail_new_running_trials(study, initial_running) or interrupted
     if pending_error is not None:
         raise pending_error
     return _run_summary(study, interrupted)
@@ -203,7 +201,6 @@ def run_process_trials(
     evaluator: Callable[[dict[str, int | float]], TrialEvaluation],
 ) -> RunSummary:
     """Evaluate parameters in worker processes while coordinating Optuna in the parent."""
-    initial_running = _running_trial_numbers(study)
     interrupted = False
     pending_error: BaseException | None = None
     pool: ProcessPoolExecutor | None = None
@@ -257,7 +254,6 @@ def run_process_trials(
             cleanup_error = _drain_interrupted_trials(study, in_flight)
             if pending_error is None:
                 pending_error = cleanup_error
-            interrupted = _fail_new_running_trials(study, initial_running) or interrupted
         if pool is not None:
             interrupted = _shutdown_process_pool(pool, aborting) or interrupted
     if pending_error is not None:
@@ -277,7 +273,7 @@ def _refill_process_trials(
     """Keep bounded worker tasks without asking beyond the terminal target."""
     missing = target_trials - terminal_trial_count(study) - len(in_flight)
     for _ in range(min(workers - len(in_flight), missing)):
-        trial = study.ask()
+        trial = _ask_owned_trial(study)
         try:
             parameters = suggest_momentum_parameters(trial, bounds)
             future = pool.submit(evaluator, parameters)
@@ -328,32 +324,26 @@ def _shutdown_process_pool(pool: ProcessPoolExecutor, nonblocking: bool) -> bool
             nonblocking = True
 
 
-def _running_trial_numbers(study: Study) -> set[int]:
-    """Snapshot running trials that predate this coordinator invocation."""
-    return {
-        trial.number for trial in study.get_trials(deepcopy=False, states=(TrialState.RUNNING,))
-    }
+def _ask_owned_trial(study: Study) -> Trial:
+    """Return an asked trial while deferring SIGINT until its ownership is locally established."""
+    can_mask_sigint = hasattr(signal, "pthread_sigmask") and (
+        threading.current_thread() is threading.main_thread()
+    )
+    if not can_mask_sigint:
+        return study.ask()
 
-
-def _fail_new_running_trials(study: Study, initial_running: set[int]) -> bool:
-    """Terminalize newly persisted trials that an interrupt prevented the runner from owning."""
-    interrupted = False
-    while True:
-        try:
-            running = study.get_trials(deepcopy=False, states=(TrialState.RUNNING,))
-            break
-        except KeyboardInterrupt:
-            interrupted = True
-    for trial in running:
-        if trial.number in initial_running:
-            continue
-        while True:
-            try:
-                study.tell(trial.number, state=TrialState.FAIL, skip_if_finished=True)
-                break
-            except KeyboardInterrupt:
-                interrupted = True
-    return interrupted
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    try:
+        trial = study.ask()
+    except BaseException:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        raise
+    try:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+    except BaseException as exc:
+        _mark_trial_failed(study, trial, exc)
+        raise
+    return trial
 
 
 def _mark_trial_failed(study: Study, trial: Trial, error: BaseException) -> bool:
@@ -392,10 +382,12 @@ def _finish_process_trial(
         return False
     except BaseException as exc:
         interrupted = _mark_trial_failed(study, trial, exc)
-        if isinstance(exc, KeyboardInterrupt) or interrupted:
-            return True
         if not isinstance(exc, Exception):
+            if isinstance(exc, KeyboardInterrupt):
+                return True
             raise
+        if interrupted:
+            return True
         return False
 
 
