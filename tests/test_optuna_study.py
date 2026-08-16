@@ -1,5 +1,6 @@
 """Tests for persistent Optuna study safety and trial metadata."""
 
+from concurrent.futures import Future, wait as futures_wait
 import json
 import sys
 from dataclasses import replace
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from optimization.momentum_evaluator import BacktestRunConfig
 from optimization.momentum_objective import FoldMetrics, LossConfig, SearchBounds, TrialEvaluation
+import optimization.optuna_study as optuna_study_module
 from optimization.optuna_study import (
     build_metadata,
     create_or_load_study,
@@ -49,6 +51,44 @@ def _evaluation(loss: float = 3.5) -> TrialEvaluation:
 def _process_evaluator(parameters: dict[str, int | float]) -> TrialEvaluation:
     """Evaluate parameters in a picklable worker without access to study storage."""
     return _evaluation(float(parameters["buy_roc_period"]))
+
+
+def _process_type_error(parameters: dict[str, int | float]) -> TrialEvaluation:
+    """Raise an ordinary evaluator exception in a real worker process."""
+    raise TypeError(f"bad parameter {parameters['buy_roc_period']}")
+
+
+class _ExecutorDouble:
+    """Provide controlled submit outcomes while keeping real Optuna storage in tests."""
+
+    def __init__(self, outcomes: list[Future[TrialEvaluation] | BaseException]) -> None:
+        self.outcomes = outcomes
+
+    def __enter__(self) -> "_ExecutorDouble":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def submit(
+        self,
+        evaluator: object,
+        parameters: dict[str, int | float],
+    ) -> Future[TrialEvaluation]:
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        return None
+
+
+class _InterruptingResultFuture(Future[TrialEvaluation]):
+    """Simulate a second Ctrl-C while the interrupted coordinator drains results."""
+
+    def result(self, timeout: float | None = None) -> TrialEvaluation:
+        raise KeyboardInterrupt
 
 
 def test_sequential_target_is_total_trials(tmp_path: Path) -> None:
@@ -95,6 +135,18 @@ def test_sequential_evaluation_failure_still_reaches_target(tmp_path: Path) -> N
     assert study.trials[0].user_attrs["failure"] == "invalid evaluation"
 
 
+def test_sequential_suggestion_failure_terminalizes_each_trial(tmp_path: Path) -> None:
+    """Prevents invalid search bounds from leaving ask-created trials running."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
+    invalid_bounds = SearchBounds(12, 12, 6, 6, 0.02, 0.01)
+
+    summary = run_sequential_trials(study, 2, invalid_bounds, _process_evaluator)
+
+    assert terminal_trial_count(study) == 2
+    assert summary.completed == 0
+    assert summary.failed == 2
+
+
 def test_process_runner_keeps_sqlite_in_parent(tmp_path: Path) -> None:
     """Coordinates real process workers while all Optuna persistence stays in the parent."""
     path = tmp_path / "study.db"
@@ -115,6 +167,92 @@ def test_process_runner_keeps_sqlite_in_parent(tmp_path: Path) -> None:
     assert summary.completed == 4
     assert summary.failed == 0
     assert summary.interrupted is False
+
+
+def test_process_evaluator_exception_terminalizes_every_trial(tmp_path: Path) -> None:
+    """Converts arbitrary exceptions returned by worker futures into terminal failures."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, True)
+
+    summary = run_process_trials(
+        study,
+        2,
+        2,
+        _fixed_bounds(),
+        None,
+        (),
+        _process_type_error,
+    )
+
+    assert terminal_trial_count(study) == 2
+    assert summary.completed == 0
+    assert summary.failed == 2
+    assert all(trial.user_attrs["failure"].startswith("bad parameter") for trial in study.trials)
+
+
+def test_process_submit_failure_terminalizes_each_asked_trial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps every trial terminal when the process executor rejects submissions."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, True)
+    executor = _ExecutorDouble([OSError("submit failed"), OSError("submit failed")])
+    monkeypatch.setattr(optuna_study_module, "ProcessPoolExecutor", lambda **kwargs: executor)
+
+    summary = run_process_trials(
+        study,
+        2,
+        1,
+        _fixed_bounds(),
+        None,
+        (),
+        _process_evaluator,
+    )
+
+    assert terminal_trial_count(study) == 2
+    assert summary.completed == 0
+    assert summary.failed == 2
+    assert all(trial.user_attrs["failure"] == "submit failed" for trial in study.trials)
+
+
+def test_repeated_process_interrupt_stops_refill_and_terminalizes_all_asked_trials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Survives repeated Ctrl-C while collecting finished and cancelling queued work."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, True)
+    completed: Future[TrialEvaluation] = Future()
+    completed.set_result(_evaluation(1.0))
+    interrupted = _InterruptingResultFuture()
+    interrupted.set_result(_evaluation(2.0))
+    queued: Future[TrialEvaluation] = Future()
+    executor = _ExecutorDouble([completed, interrupted, queued])
+    monkeypatch.setattr(optuna_study_module, "ProcessPoolExecutor", lambda **kwargs: executor)
+    waits = 0
+
+    def interrupt_once(*args: object, **kwargs: object) -> object:
+        nonlocal waits
+        waits += 1
+        if waits == 1:
+            raise KeyboardInterrupt
+        return futures_wait(*args, **kwargs)
+
+    monkeypatch.setattr(optuna_study_module, "wait", interrupt_once)
+
+    summary = run_process_trials(
+        study,
+        5,
+        3,
+        _fixed_bounds(),
+        None,
+        (),
+        _process_evaluator,
+    )
+
+    assert len(study.trials) == 3
+    assert terminal_trial_count(study) == 3
+    assert summary.completed == 1
+    assert summary.failed == 2
+    assert summary.interrupted is True
 
 
 def test_matching_metadata_resumes_and_mismatch_fails(tmp_path: Path) -> None:
