@@ -6,7 +6,6 @@ import signal
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable
 
 import optuna
 import pandas as pd
@@ -60,11 +59,27 @@ def _process_type_error(parameters: dict[str, int | float]) -> TrialEvaluation:
     raise TypeError(f"bad parameter {parameters['buy_roc_period']}")
 
 
-def _interrupt_when_sigint_is_restored(
+def _interrupt_when_sigint_handler_is_restored(
     monkeypatch: pytest.MonkeyPatch,
-    before_interrupt: Callable[[], object] | None = None,
 ) -> None:
-    """Inject Ctrl-C after a signal-blocked ask has returned its owned trial."""
+    """Inject Ctrl-C while the temporary SIGINT handler is being restored."""
+    calls = 0
+    previous_handler = signal.getsignal(signal.SIGINT)
+
+    def set_signal_handler(signal_number: int, handler: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return previous_handler
+        if calls == 2:
+            raise KeyboardInterrupt
+        return previous_handler
+
+    monkeypatch.setattr(signal, "signal", set_signal_handler)
+
+
+def _interrupt_when_sigint_mask_is_restored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inject Ctrl-C at the legacy POSIX signal-mask restoration boundary."""
     calls = 0
 
     def pthread_sigmask(how: int, mask: object) -> set[signal.Signals]:
@@ -72,11 +87,54 @@ def _interrupt_when_sigint_is_restored(
         calls += 1
         if calls == 1:
             return set()
-        if before_interrupt is not None:
-            before_interrupt()
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(signal, "pthread_sigmask", pthread_sigmask)
+    monkeypatch.setattr(signal, "pthread_sigmask", pthread_sigmask, raising=False)
+
+
+def _deliver_sigint_before_ask_returns(
+    study: optuna.study.Study,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deliver Ctrl-C after one owned and one unrelated trial have been persisted."""
+    active_handler: object = signal.default_int_handler
+
+    def get_signal_handler(signal_number: int) -> object:
+        return active_handler
+
+    def set_signal_handler(signal_number: int, handler: object) -> object:
+        nonlocal active_handler
+        previous_handler = active_handler
+        active_handler = handler
+        return previous_handler
+
+    ask = study.ask
+
+    def ask_then_sigint() -> optuna.trial.Trial:
+        trial = ask()
+        ask()
+        assert callable(active_handler)
+        active_handler(signal.SIGINT, None)
+        return trial
+
+    monkeypatch.setattr(signal, "getsignal", get_signal_handler)
+    monkeypatch.setattr(signal, "signal", set_signal_handler)
+    monkeypatch.setattr(study, "ask", ask_then_sigint)
+
+
+def _interrupt_first_trial_failure_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inject one nested Ctrl-C while a trial failure is being recorded."""
+    set_user_attr = optuna.trial.Trial.set_user_attr
+    writes = 0
+
+    def interrupt_first_write(trial: optuna.trial.Trial, key: str, value: object) -> None:
+        nonlocal writes
+        writes += 1
+        if writes == 1:
+            raise KeyboardInterrupt
+        set_user_attr(trial, key, value)
+
+    monkeypatch.setattr(optuna.trial.Trial, "set_user_attr", interrupt_first_write)
 
 
 class _ExecutorDouble:
@@ -168,14 +226,32 @@ def test_sequential_suggestion_failure_terminalizes_each_trial(tmp_path: Path) -
     assert summary.failed == 2
 
 
+def test_sequential_system_exit_survives_interrupt_during_terminalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserves evaluator SystemExit when failure persistence also sees Ctrl-C."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
+    _interrupt_first_trial_failure_write(monkeypatch)
+
+    def stop_evaluation(parameters: dict[str, int | float]) -> TrialEvaluation:
+        raise SystemExit("evaluation stopped")
+
+    with pytest.raises(SystemExit, match="evaluation stopped"):
+        run_sequential_trials(study, 1, _fixed_bounds(), stop_evaluation)
+
+    assert terminal_trial_count(study) == 1
+    assert study.trials[0].state is optuna.trial.TrialState.FAIL
+
+
 def test_sequential_interrupt_after_ask_terminalizes_the_created_trial(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Recovers a trial persisted just before Ctrl-C prevents ask from returning to the runner."""
     study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
-    ask = study.ask
-    _interrupt_when_sigint_is_restored(monkeypatch, ask)
+    monkeypatch.delattr(signal, "pthread_sigmask", raising=False)
+    _deliver_sigint_before_ask_returns(study, monkeypatch)
 
     summary = run_sequential_trials(study, 2, _fixed_bounds(), _process_evaluator)
 
@@ -186,6 +262,31 @@ def test_sequential_interrupt_after_ask_terminalizes_the_created_trial(
     assert summary.interrupted is True
     assert study.trials[0].state is optuna.trial.TrialState.FAIL
     assert study.trials[1].state is optuna.trial.TrialState.RUNNING
+
+
+def test_sequential_ask_error_survives_interrupt_during_signal_restoration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps an ask SystemExit primary when SIGINT arrives during handler restoration."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
+    _interrupt_when_sigint_mask_is_restored(monkeypatch)
+    _interrupt_when_sigint_handler_is_restored(monkeypatch)
+
+    def stop_asking() -> optuna.trial.Trial:
+        raise SystemExit("ask stopped")
+
+    monkeypatch.setattr(study, "ask", stop_asking)
+    raised: BaseException | None = None
+
+    try:
+        run_sequential_trials(study, 1, _fixed_bounds(), _process_evaluator)
+    except BaseException as exc:
+        raised = exc
+
+    assert isinstance(raised, SystemExit)
+    assert str(raised) == "ask stopped"
+    assert study.trials == []
 
 
 def test_process_runner_keeps_sqlite_in_parent(tmp_path: Path) -> None:
@@ -253,6 +354,44 @@ def test_process_submit_failure_terminalizes_each_asked_trial(
     assert summary.completed == 0
     assert summary.failed == 2
     assert all(trial.user_attrs["failure"] == "submit failed" for trial in study.trials)
+
+
+@pytest.mark.parametrize("failure_stage", ["suggestion", "submission"])
+def test_process_setup_system_exit_survives_interrupt_during_terminalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    """Preserves setup SystemExit when failure persistence also sees Ctrl-C."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, True)
+    outcomes = [] if failure_stage == "suggestion" else [SystemExit("setup stopped")]
+    executor = _ExecutorDouble(outcomes)
+    monkeypatch.setattr(optuna_study_module, "ProcessPoolExecutor", lambda **kwargs: executor)
+    if failure_stage == "suggestion":
+
+        def stop_suggestion(trial: optuna.trial.Trial, bounds: SearchBounds) -> None:
+            raise SystemExit("setup stopped")
+
+        monkeypatch.setattr(
+            optuna_study_module,
+            "suggest_momentum_parameters",
+            stop_suggestion,
+        )
+    _interrupt_first_trial_failure_write(monkeypatch)
+
+    with pytest.raises(SystemExit, match="setup stopped"):
+        run_process_trials(
+            study,
+            1,
+            1,
+            _fixed_bounds(),
+            None,
+            (),
+            _process_evaluator,
+        )
+
+    assert terminal_trial_count(study) == 1
+    assert study.trials[0].state is optuna.trial.TrialState.FAIL
 
 
 def test_repeated_process_interrupt_stops_refill_and_terminalizes_all_asked_trials(
@@ -336,17 +475,7 @@ def test_process_system_exit_survives_interrupt_during_terminalization(
     executor = _ExecutorDouble([fatal])
     monkeypatch.setattr(optuna_study_module, "ProcessPoolExecutor", lambda **kwargs: executor)
     monkeypatch.setattr(optuna_study_module, "wait", lambda *args, **kwargs: ({fatal}, set()))
-    set_user_attr = optuna.trial.Trial.set_user_attr
-    writes = 0
-
-    def interrupt_first_attr_write(trial: optuna.trial.Trial, key: str, value: object) -> None:
-        nonlocal writes
-        writes += 1
-        if writes == 1:
-            raise KeyboardInterrupt
-        set_user_attr(trial, key, value)
-
-    monkeypatch.setattr(optuna.trial.Trial, "set_user_attr", interrupt_first_attr_write)
+    _interrupt_first_trial_failure_write(monkeypatch)
 
     with pytest.raises(SystemExit, match="worker stopped"):
         run_process_trials(
@@ -369,7 +498,8 @@ def test_process_interrupt_after_ask_terminalizes_the_created_trial(
 ) -> None:
     """Recovers a persisted trial when Ctrl-C lands before process submission owns it."""
     study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, True)
-    _interrupt_when_sigint_is_restored(monkeypatch)
+    monkeypatch.delattr(signal, "pthread_sigmask", raising=False)
+    _deliver_sigint_before_ask_returns(study, monkeypatch)
     executor = _ExecutorDouble([])
     monkeypatch.setattr(optuna_study_module, "ProcessPoolExecutor", lambda **kwargs: executor)
 
@@ -383,11 +513,13 @@ def test_process_interrupt_after_ask_terminalizes_the_created_trial(
         _process_evaluator,
     )
 
-    assert len(study.trials) == 1
+    assert len(study.trials) == 2
     assert terminal_trial_count(study) == 1
     assert summary.completed == 0
     assert summary.failed == 1
     assert summary.interrupted is True
+    assert study.trials[0].state is optuna.trial.TrialState.FAIL
+    assert study.trials[1].state is optuna.trial.TrialState.RUNNING
 
 
 def test_matching_metadata_resumes_and_mismatch_fails(tmp_path: Path) -> None:

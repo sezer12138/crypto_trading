@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import signal
 import threading
+from types import FrameType
 from typing import Callable, TypeAlias
 
 import optuna
@@ -177,11 +178,13 @@ def run_sequential_trials(
                 study.tell(trial, evaluation.loss)
             except BaseException as exc:
                 interrupted = _mark_trial_failed(study, trial, exc)
-                if isinstance(exc, KeyboardInterrupt) or interrupted:
+                if not isinstance(exc, Exception):
+                    if not isinstance(exc, KeyboardInterrupt):
+                        raise
                     interrupted = True
                     break
-                if not isinstance(exc, Exception):
-                    raise
+                if interrupted:
+                    break
     except KeyboardInterrupt:
         interrupted = True
     except BaseException as exc:
@@ -280,10 +283,12 @@ def _refill_process_trials(
             in_flight[future] = trial
         except BaseException as exc:
             interrupted = _mark_trial_failed(study, trial, exc)
-            if isinstance(exc, KeyboardInterrupt) or interrupted:
-                return True
             if not isinstance(exc, Exception):
-                raise
+                if not isinstance(exc, KeyboardInterrupt):
+                    raise
+                return True
+            if interrupted:
+                return True
     return False
 
 
@@ -325,25 +330,62 @@ def _shutdown_process_pool(pool: ProcessPoolExecutor, nonblocking: bool) -> bool
 
 
 def _ask_owned_trial(study: Study) -> Trial:
-    """Return an asked trial while deferring SIGINT until its ownership is locally established."""
-    can_mask_sigint = hasattr(signal, "pthread_sigmask") and (
-        threading.current_thread() is threading.main_thread()
-    )
-    if not can_mask_sigint:
+    """Return an asked trial while deferring SIGINT until exact ownership is established."""
+    if threading.current_thread() is not threading.main_thread():
         return study.ask()
 
-    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    deferred_sigint: tuple[int, FrameType | None] | None = None
+
+    def defer_sigint(signal_number: int, frame: FrameType | None) -> None:
+        nonlocal deferred_sigint
+        deferred_sigint = (signal_number, frame)
+
+    previous_handler = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, defer_sigint)
+    trial: Trial | None = None
+    ask_error: BaseException | None = None
     try:
         trial = study.ask()
-    except BaseException:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
-        raise
-    try:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
     except BaseException as exc:
-        _mark_trial_failed(study, trial, exc)
-        raise
+        ask_error = exc
+
+    restore_error: BaseException | None = None
+    while True:
+        try:
+            signal.signal(signal.SIGINT, previous_handler)
+            break
+        except KeyboardInterrupt as exc:
+            if restore_error is None:
+                restore_error = exc
+        except BaseException as exc:
+            restore_error = exc
+            break
+
+    if ask_error is not None:
+        raise ask_error
+    if trial is None:
+        raise RuntimeError("Optuna ask completed without a trial or an error")
+    if restore_error is not None:
+        _mark_trial_failed(study, trial, restore_error)
+        raise restore_error
+    if deferred_sigint is not None:
+        try:
+            _replay_sigint(previous_handler, *deferred_sigint)
+        except BaseException as exc:
+            _mark_trial_failed(study, trial, exc)
+            raise
     return trial
+
+
+def _replay_sigint(handler: object, signal_number: int, frame: FrameType | None) -> None:
+    """Deliver one deferred SIGINT using the handler that preceded the ownership boundary."""
+    if handler == signal.SIG_IGN:
+        return
+    if handler == signal.SIG_DFL:
+        signal.default_int_handler(signal_number, frame)
+        return
+    if callable(handler):
+        handler(signal_number, frame)
 
 
 def _mark_trial_failed(study: Study, trial: Trial, error: BaseException) -> bool:
