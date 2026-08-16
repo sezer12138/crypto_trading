@@ -163,20 +163,34 @@ def run_sequential_trials(
     evaluator: Callable[[dict[str, int | float]], TrialEvaluation],
 ) -> RunSummary:
     """Evaluate trials sequentially until the study reaches the terminal target."""
-    while terminal_trial_count(study) < target_trials:
-        trial = study.ask()
-        try:
-            parameters = suggest_momentum_parameters(trial, bounds)
-            evaluation = evaluator(parameters)
-            record_evaluation(trial, evaluation)
-            study.tell(trial, evaluation.loss)
-        except BaseException as exc:
-            interrupted = _mark_trial_failed(study, trial, exc)
-            if isinstance(exc, KeyboardInterrupt) or interrupted:
-                return _run_summary(study, interrupted=True)
-            if not isinstance(exc, Exception):
-                raise
-    return _run_summary(study, interrupted=False)
+    initial_running = _running_trial_numbers(study)
+    interrupted = False
+    pending_error: BaseException | None = None
+    try:
+        while terminal_trial_count(study) < target_trials:
+            trial = study.ask()
+            try:
+                parameters = suggest_momentum_parameters(trial, bounds)
+                evaluation = evaluator(parameters)
+                record_evaluation(trial, evaluation)
+                study.tell(trial, evaluation.loss)
+            except BaseException as exc:
+                interrupted = _mark_trial_failed(study, trial, exc)
+                if isinstance(exc, KeyboardInterrupt) or interrupted:
+                    interrupted = True
+                    break
+                if not isinstance(exc, Exception):
+                    raise
+    except KeyboardInterrupt:
+        interrupted = True
+    except BaseException as exc:
+        pending_error = exc
+    finally:
+        if interrupted or pending_error is not None:
+            interrupted = _fail_new_running_trials(study, initial_running) or interrupted
+    if pending_error is not None:
+        raise pending_error
+    return _run_summary(study, interrupted)
 
 
 def run_process_trials(
@@ -189,7 +203,9 @@ def run_process_trials(
     evaluator: Callable[[dict[str, int | float]], TrialEvaluation],
 ) -> RunSummary:
     """Evaluate parameters in worker processes while coordinating Optuna in the parent."""
+    initial_running = _running_trial_numbers(study)
     interrupted = False
+    pending_error: BaseException | None = None
     pool: ProcessPoolExecutor | None = None
     in_flight: dict[Future[TrialEvaluation], Trial] = {}
     try:
@@ -219,7 +235,12 @@ def run_process_trials(
                 break
             for future in finished:
                 trial = in_flight[future]
-                if _finish_process_trial(study, trial, future):
+                try:
+                    result_interrupted = _finish_process_trial(study, trial, future)
+                except BaseException:
+                    in_flight.pop(future, None)
+                    raise
+                if result_interrupted:
                     interrupted = True
                     in_flight.pop(future, None)
                     break
@@ -228,11 +249,19 @@ def run_process_trials(
                 break
     except KeyboardInterrupt:
         interrupted = True
+    except BaseException as exc:
+        pending_error = exc
     finally:
-        if interrupted:
-            _drain_interrupted_trials(study, in_flight)
+        aborting = interrupted or pending_error is not None
+        if aborting:
+            cleanup_error = _drain_interrupted_trials(study, in_flight)
+            if pending_error is None:
+                pending_error = cleanup_error
+            interrupted = _fail_new_running_trials(study, initial_running) or interrupted
         if pool is not None:
-            interrupted = _shutdown_process_pool(pool, interrupted)
+            interrupted = _shutdown_process_pool(pool, aborting) or interrupted
+    if pending_error is not None:
+        raise pending_error
     return _run_summary(study, interrupted)
 
 
@@ -265,8 +294,9 @@ def _refill_process_trials(
 def _drain_interrupted_trials(
     study: Study,
     in_flight: dict[Future[TrialEvaluation], Trial],
-) -> None:
+) -> BaseException | None:
     """Collect finished work and fail queued or running work without blocking."""
+    pending_error: BaseException | None = None
     for future, trial in list(in_flight.items()):
         while True:
             try:
@@ -278,18 +308,52 @@ def _drain_interrupted_trials(
                     _mark_trial_failed(study, trial, RuntimeError("Interrupted while running"))
             except KeyboardInterrupt:
                 continue
+            except BaseException as exc:
+                if pending_error is None:
+                    pending_error = exc
             in_flight.pop(future, None)
             break
+    return pending_error
 
 
-def _shutdown_process_pool(pool: ProcessPoolExecutor, interrupted: bool) -> bool:
+def _shutdown_process_pool(pool: ProcessPoolExecutor, nonblocking: bool) -> bool:
     """Shut down workers without letting repeated interrupts strand trial state."""
+    interrupted = False
     while True:
         try:
-            pool.shutdown(wait=not interrupted, cancel_futures=interrupted)
+            pool.shutdown(wait=not nonblocking, cancel_futures=nonblocking)
             return interrupted
         except KeyboardInterrupt:
             interrupted = True
+            nonblocking = True
+
+
+def _running_trial_numbers(study: Study) -> set[int]:
+    """Snapshot running trials that predate this coordinator invocation."""
+    return {
+        trial.number for trial in study.get_trials(deepcopy=False, states=(TrialState.RUNNING,))
+    }
+
+
+def _fail_new_running_trials(study: Study, initial_running: set[int]) -> bool:
+    """Terminalize newly persisted trials that an interrupt prevented the runner from owning."""
+    interrupted = False
+    while True:
+        try:
+            running = study.get_trials(deepcopy=False, states=(TrialState.RUNNING,))
+            break
+        except KeyboardInterrupt:
+            interrupted = True
+    for trial in running:
+        if trial.number in initial_running:
+            continue
+        while True:
+            try:
+                study.tell(trial.number, state=TrialState.FAIL, skip_if_finished=True)
+                break
+            except KeyboardInterrupt:
+                interrupted = True
+    return interrupted
 
 
 def _mark_trial_failed(study: Study, trial: Trial, error: BaseException) -> bool:

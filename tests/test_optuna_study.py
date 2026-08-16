@@ -147,6 +147,29 @@ def test_sequential_suggestion_failure_terminalizes_each_trial(tmp_path: Path) -
     assert summary.failed == 2
 
 
+def test_sequential_interrupt_after_ask_terminalizes_the_created_trial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovers a trial persisted just before Ctrl-C prevents ask from returning to the runner."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
+    ask = study.ask
+
+    def ask_then_interrupt() -> None:
+        ask()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(study, "ask", ask_then_interrupt)
+
+    summary = run_sequential_trials(study, 2, _fixed_bounds(), _process_evaluator)
+
+    assert len(study.trials) == 1
+    assert terminal_trial_count(study) == 1
+    assert summary.completed == 0
+    assert summary.failed == 1
+    assert summary.interrupted is True
+
+
 def test_process_runner_keeps_sqlite_in_parent(tmp_path: Path) -> None:
     """Coordinates real process workers while all Optuna persistence stays in the parent."""
     path = tmp_path / "study.db"
@@ -252,6 +275,68 @@ def test_repeated_process_interrupt_stops_refill_and_terminalizes_all_asked_tria
     assert terminal_trial_count(study) == 3
     assert summary.completed == 1
     assert summary.failed == 2
+    assert summary.interrupted is True
+
+
+def test_process_system_exit_drains_owned_peer_before_propagating(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminalizes peer trials before preserving a worker SystemExit."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, True)
+    fatal: Future[TrialEvaluation] = Future()
+    fatal.set_exception(SystemExit("worker stopped"))
+    peer: Future[TrialEvaluation] = Future()
+    executor = _ExecutorDouble([fatal, peer])
+    monkeypatch.setattr(optuna_study_module, "ProcessPoolExecutor", lambda **kwargs: executor)
+    monkeypatch.setattr(optuna_study_module, "wait", lambda *args, **kwargs: ({fatal}, {peer}))
+
+    with pytest.raises(SystemExit, match="worker stopped"):
+        run_process_trials(
+            study,
+            2,
+            2,
+            _fixed_bounds(),
+            None,
+            (),
+            _process_evaluator,
+        )
+
+    assert len(study.trials) == 2
+    assert terminal_trial_count(study) == 2
+    assert all(trial.state is optuna.trial.TrialState.FAIL for trial in study.trials)
+
+
+def test_process_interrupt_after_ask_terminalizes_the_created_trial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovers a persisted trial when Ctrl-C lands before process submission owns it."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, True)
+    ask = study.ask
+
+    def ask_then_interrupt() -> None:
+        ask()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(study, "ask", ask_then_interrupt)
+    executor = _ExecutorDouble([])
+    monkeypatch.setattr(optuna_study_module, "ProcessPoolExecutor", lambda **kwargs: executor)
+
+    summary = run_process_trials(
+        study,
+        2,
+        1,
+        _fixed_bounds(),
+        None,
+        (),
+        _process_evaluator,
+    )
+
+    assert len(study.trials) == 1
+    assert terminal_trial_count(study) == 1
+    assert summary.completed == 0
+    assert summary.failed == 1
     assert summary.interrupted is True
 
 
