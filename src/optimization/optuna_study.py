@@ -1,9 +1,10 @@
 """Persistent Optuna studies and auditable Bayesian trial metadata."""
 
-from dataclasses import asdict
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+from dataclasses import asdict, dataclass
 import math
 from pathlib import Path
-from typing import TypeAlias
+from typing import Callable, TypeAlias
 
 import optuna
 import pandas as pd
@@ -12,13 +13,27 @@ from optuna.trial import Trial, TrialState
 
 from optimization.data import fingerprint_file
 from optimization.momentum_evaluator import BacktestRunConfig
-from optimization.momentum_objective import LossConfig, SearchBounds, TrialEvaluation
+from optimization.momentum_objective import (
+    LossConfig,
+    SearchBounds,
+    TrialEvaluation,
+    suggest_momentum_parameters,
+)
 
 JSONSerializable: TypeAlias = (
     str | int | float | bool | None | list["JSONSerializable"] | dict[str, "JSONSerializable"]
 )
 
 OPTIMIZER_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    """Terminal study counts and whether scheduling stopped on interruption."""
+
+    completed: int
+    failed: int
+    interrupted: bool
 
 
 def build_metadata(
@@ -129,6 +144,128 @@ def record_evaluation(trial: Trial, evaluation: TrialEvaluation) -> None:
     _validate_json_safe(attributes)
     for key, value in attributes.items():
         trial.set_user_attr(key, value)
+
+
+def terminal_trial_count(study: Study) -> int:
+    """Return the number of complete or failed trials in a study."""
+    return len(
+        study.get_trials(
+            deepcopy=False,
+            states=(TrialState.COMPLETE, TrialState.FAIL),
+        )
+    )
+
+
+def run_sequential_trials(
+    study: Study,
+    target_trials: int,
+    bounds: SearchBounds,
+    evaluator: Callable[[dict[str, int | float]], TrialEvaluation],
+) -> RunSummary:
+    """Evaluate trials sequentially until the study reaches the terminal target."""
+    while terminal_trial_count(study) < target_trials:
+        trial = study.ask()
+        parameters = suggest_momentum_parameters(trial, bounds)
+        try:
+            evaluation = evaluator(parameters)
+            record_evaluation(trial, evaluation)
+            study.tell(trial, evaluation.loss)
+        except (ValueError, RuntimeError) as exc:
+            trial.set_user_attr("failure", str(exc))
+            study.tell(trial, state=TrialState.FAIL)
+    return _run_summary(study, interrupted=False)
+
+
+def run_process_trials(
+    study: Study,
+    target_trials: int,
+    workers: int,
+    bounds: SearchBounds,
+    initializer: Callable[..., None] | None,
+    initargs: tuple[object, ...],
+    evaluator: Callable[[dict[str, int | float]], TrialEvaluation],
+) -> RunSummary:
+    """Evaluate parameters in worker processes while coordinating Optuna in the parent."""
+    interrupted = False
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=initializer,
+        initargs=initargs,
+    ) as pool:
+        in_flight: dict[Future[TrialEvaluation], Trial] = {}
+        _refill_process_trials(pool, in_flight, study, target_trials, workers, bounds, evaluator)
+        while in_flight:
+            try:
+                finished, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+            except KeyboardInterrupt:
+                interrupted = True
+                _cancel_pending_trials(study, in_flight)
+                finished, _ = wait(in_flight)
+            for future in finished:
+                trial = in_flight.pop(future)
+                _finish_process_trial(study, trial, future)
+            if not interrupted:
+                _refill_process_trials(
+                    pool,
+                    in_flight,
+                    study,
+                    target_trials,
+                    workers,
+                    bounds,
+                    evaluator,
+                )
+    return _run_summary(study, interrupted)
+
+
+def _refill_process_trials(
+    pool: ProcessPoolExecutor,
+    in_flight: dict[Future[TrialEvaluation], Trial],
+    study: Study,
+    target_trials: int,
+    workers: int,
+    bounds: SearchBounds,
+    evaluator: Callable[[dict[str, int | float]], TrialEvaluation],
+) -> None:
+    """Keep bounded worker tasks without asking beyond the terminal target."""
+    missing = target_trials - terminal_trial_count(study) - len(in_flight)
+    for _ in range(min(workers - len(in_flight), missing)):
+        trial = study.ask()
+        parameters = suggest_momentum_parameters(trial, bounds)
+        in_flight[pool.submit(evaluator, parameters)] = trial
+
+
+def _cancel_pending_trials(
+    study: Study,
+    in_flight: dict[Future[TrialEvaluation], Trial],
+) -> None:
+    """Cancel queued evaluations and make their corresponding trials terminal."""
+    for future, trial in list(in_flight.items()):
+        if future.cancel():
+            trial.set_user_attr("failure", "Cancelled after KeyboardInterrupt")
+            study.tell(trial, state=TrialState.FAIL)
+            del in_flight[future]
+
+
+def _finish_process_trial(
+    study: Study,
+    trial: Trial,
+    future: Future[TrialEvaluation],
+) -> None:
+    """Persist one worker result, converting supported evaluation errors to failures."""
+    try:
+        evaluation = future.result()
+        record_evaluation(trial, evaluation)
+        study.tell(trial, evaluation.loss)
+    except (ValueError, RuntimeError) as exc:
+        trial.set_user_attr("failure", str(exc))
+        study.tell(trial, state=TrialState.FAIL)
+
+
+def _run_summary(study: Study, interrupted: bool) -> RunSummary:
+    """Snapshot complete and failed trial counts from persistent storage."""
+    completed = len(study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,)))
+    failed = len(study.get_trials(deepcopy=False, states=(TrialState.FAIL,)))
+    return RunSummary(completed, failed, interrupted)
 
 
 def _json_mapping(values: dict[str, object]) -> dict[str, JSONSerializable]:

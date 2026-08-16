@@ -18,6 +18,9 @@ from optimization.optuna_study import (
     create_or_load_study,
     record_evaluation,
     recover_stale_trials,
+    run_process_trials,
+    run_sequential_trials,
+    terminal_trial_count,
 )
 
 
@@ -26,16 +29,92 @@ def _bounds() -> SearchBounds:
     return SearchBounds(12, 8064, 6, 4032, 0.005, 0.25)
 
 
-def _evaluation() -> TrialEvaluation:
+def _fixed_bounds() -> SearchBounds:
+    """Return a deterministic search space for coordinator tests."""
+    return SearchBounds(12, 12, 6, 6, 0.01, 0.01)
+
+
+def _evaluation(loss: float = 3.5) -> TrialEvaluation:
     """Return a complete trial evaluation with two fold records."""
     return TrialEvaluation(
-        loss=3.5,
+        loss=loss,
         robust_annual_return_pct=12.5,
         worst_drawdown_pct=18.0,
         instability=4.25,
         missing_round_trips=1,
         folds=(FoldMetrics(10.0, -12.0, 4), FoldMetrics(15.0, -18.0, 2)),
     )
+
+
+def _process_evaluator(parameters: dict[str, int | float]) -> TrialEvaluation:
+    """Evaluate parameters in a picklable worker without access to study storage."""
+    return _evaluation(float(parameters["buy_roc_period"]))
+
+
+def test_sequential_target_is_total_trials(tmp_path: Path) -> None:
+    """Schedules only the missing terminal trials when resuming a study."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
+    trial = study.ask()
+    trial.suggest_int("buy_roc_period", 12, 12, log=True)
+    study.tell(trial, 5.0)
+    calls: list[dict[str, int | float]] = []
+
+    summary = run_sequential_trials(
+        study,
+        3,
+        _fixed_bounds(),
+        lambda parameters: calls.append(parameters) or _evaluation(1.0),
+    )
+
+    assert len(calls) == 2
+    assert terminal_trial_count(study) == 3
+    assert summary.completed == 3
+    assert summary.failed == 0
+    assert summary.interrupted is False
+
+
+def test_sequential_evaluation_failure_still_reaches_target(tmp_path: Path) -> None:
+    """Turns a caught evaluator failure terminal and continues to the exact target."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
+    calls = 0
+
+    def fail_first(parameters: dict[str, int | float]) -> TrialEvaluation:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ValueError("invalid evaluation")
+        return _evaluation(float(parameters["buy_roc_period"]))
+
+    summary = run_sequential_trials(study, 3, _fixed_bounds(), fail_first)
+
+    assert calls == 3
+    assert terminal_trial_count(study) == 3
+    assert summary.completed == 2
+    assert summary.failed == 1
+    assert summary.interrupted is False
+    assert study.trials[0].user_attrs["failure"] == "invalid evaluation"
+
+
+def test_process_runner_keeps_sqlite_in_parent(tmp_path: Path) -> None:
+    """Coordinates real process workers while all Optuna persistence stays in the parent."""
+    path = tmp_path / "study.db"
+    study = create_or_load_study(path, "momentum", {}, 42, 5, True)
+
+    summary = run_process_trials(
+        study,
+        4,
+        2,
+        _fixed_bounds(),
+        None,
+        (),
+        _process_evaluator,
+    )
+
+    resumed = create_or_load_study(path, "momentum", {}, 42, 5, True)
+    assert terminal_trial_count(resumed) == 4
+    assert summary.completed == 4
+    assert summary.failed == 0
+    assert summary.interrupted is False
 
 
 def test_matching_metadata_resumes_and_mismatch_fails(tmp_path: Path) -> None:
