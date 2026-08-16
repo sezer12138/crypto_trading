@@ -78,6 +78,39 @@ def _interrupt_when_sigint_handler_is_restored(
     monkeypatch.setattr(signal, "signal", set_signal_handler)
 
 
+def _interrupt_after_sigint_handler_is_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inject Ctrl-C on the first line after successful handler restoration."""
+    signal_function = signal.signal
+    previous_trace = sys.gettrace()
+    ask_code = optuna_study_module._ask_owned_trial.__code__
+    signal_calls = 0
+    line_events = 0
+
+    def interrupt_after_restore(frame: object, event: str, arg: object) -> object:
+        nonlocal line_events
+        if getattr(frame, "f_code", None) is ask_code and event == "line":
+            line_events += 1
+            if line_events == 2:
+                sys.settrace(previous_trace)
+                frame.f_trace = previous_trace  # type: ignore[attr-defined]
+                raise KeyboardInterrupt
+        return interrupt_after_restore
+
+    def set_signal_handler(signal_number: int, handler: object) -> object:
+        nonlocal signal_calls
+        signal_calls += 1
+        previous_handler = signal_function(signal_number, handler)
+        if signal_calls == 2:
+            caller = sys._getframe(1)
+            caller.f_trace = interrupt_after_restore
+            sys.settrace(interrupt_after_restore)
+        return previous_handler
+
+    monkeypatch.setattr(signal, "signal", set_signal_handler)
+
+
 def _interrupt_when_sigint_mask_is_restored(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inject Ctrl-C at the legacy POSIX signal-mask restoration boundary."""
     calls = 0
@@ -262,6 +295,30 @@ def test_sequential_interrupt_after_ask_terminalizes_the_created_trial(
     assert summary.interrupted is True
     assert study.trials[0].state is optuna.trial.TrialState.FAIL
     assert study.trials[1].state is optuna.trial.TrialState.RUNNING
+
+
+def test_sequential_interrupt_after_handler_restore_terminalizes_handed_off_trial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps exact ownership when Ctrl-C lands after restoration but before return."""
+    study = create_or_load_study(tmp_path / "study.db", "momentum", {}, 42, 5, False)
+    study.ask()
+    previous_trace = sys.gettrace()
+    _interrupt_after_sigint_handler_is_restored(monkeypatch)
+
+    try:
+        summary = run_sequential_trials(study, 2, _fixed_bounds(), _process_evaluator)
+    finally:
+        sys.settrace(previous_trace)
+
+    assert len(study.trials) == 2
+    assert terminal_trial_count(study) == 1
+    assert summary.completed == 0
+    assert summary.failed == 1
+    assert summary.interrupted is True
+    assert study.trials[0].state is optuna.trial.TrialState.RUNNING
+    assert study.trials[1].state is optuna.trial.TrialState.FAIL
 
 
 def test_sequential_ask_error_survives_interrupt_during_signal_restoration(

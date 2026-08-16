@@ -39,6 +39,14 @@ class RunSummary:
     interrupted: bool
 
 
+@dataclass
+class _AskHandoff:
+    """Expose an exact ask result to its caller before restoring SIGINT handling."""
+
+    trial: Trial | None = None
+    error: BaseException | None = None
+
+
 def build_metadata(
     data_path: Path,
     data: pd.DataFrame,
@@ -170,14 +178,19 @@ def run_sequential_trials(
     pending_error: BaseException | None = None
     try:
         while terminal_trial_count(study) < target_trials:
-            trial = _ask_owned_trial(study)
+            handoff = _AskHandoff()
             try:
+                trial = _ask_owned_trial(study, handoff)
                 parameters = suggest_momentum_parameters(trial, bounds)
                 evaluation = evaluator(parameters)
                 record_evaluation(trial, evaluation)
                 study.tell(trial, evaluation.loss)
             except BaseException as exc:
-                interrupted = _mark_trial_failed(study, trial, exc)
+                if handoff.error is not None:
+                    raise handoff.error
+                if handoff.trial is None:
+                    raise
+                interrupted = _mark_trial_failed(study, handoff.trial, exc)
                 if not isinstance(exc, Exception):
                     if not isinstance(exc, KeyboardInterrupt):
                         raise
@@ -276,13 +289,18 @@ def _refill_process_trials(
     """Keep bounded worker tasks without asking beyond the terminal target."""
     missing = target_trials - terminal_trial_count(study) - len(in_flight)
     for _ in range(min(workers - len(in_flight), missing)):
-        trial = _ask_owned_trial(study)
+        handoff = _AskHandoff()
         try:
+            trial = _ask_owned_trial(study, handoff)
             parameters = suggest_momentum_parameters(trial, bounds)
             future = pool.submit(evaluator, parameters)
             in_flight[future] = trial
         except BaseException as exc:
-            interrupted = _mark_trial_failed(study, trial, exc)
+            if handoff.error is not None:
+                raise handoff.error
+            if handoff.trial is None:
+                raise
+            interrupted = _mark_trial_failed(study, handoff.trial, exc)
             if not isinstance(exc, Exception):
                 if not isinstance(exc, KeyboardInterrupt):
                     raise
@@ -329,10 +347,12 @@ def _shutdown_process_pool(pool: ProcessPoolExecutor, nonblocking: bool) -> bool
             nonblocking = True
 
 
-def _ask_owned_trial(study: Study) -> Trial:
+def _ask_owned_trial(study: Study, handoff: _AskHandoff) -> Trial:
     """Return an asked trial while deferring SIGINT until exact ownership is established."""
     if threading.current_thread() is not threading.main_thread():
-        return study.ask()
+        trial = study.ask()
+        handoff.trial = trial
+        return trial
 
     deferred_sigint: tuple[int, FrameType | None] | None = None
 
@@ -346,8 +366,10 @@ def _ask_owned_trial(study: Study) -> Trial:
     ask_error: BaseException | None = None
     try:
         trial = study.ask()
+        handoff.trial = trial
     except BaseException as exc:
         ask_error = exc
+        handoff.error = exc
 
     restore_error: BaseException | None = None
     while True:
