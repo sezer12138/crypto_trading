@@ -1129,14 +1129,26 @@ The output directory contains `report.html`, complete per-trial `results.json`, 
 Data already inspected during earlier analysis is retrospective validation, even when this
 search itself never reads the holdout until selection. Obtain new data for prospective confirmation.
 
-Profiles are opt-in and require identical coin, interval, initial capital, execution model,
-commission, slippage, position size and risk controls. Momentum keeps its separate profile.
+The accepted RSI and VWAP BTC/1h parameters from the 2026-10-07 search are stored in
+`src/strategies/constants.py` and selected automatically by `run_backtest.create_strategy`
+through `src/strategies/parameter_profiles.py`. No file in `results/` is required. Other coins,
+intervals and rejected strategies retain their generic defaults. Direct `get_strategy()` calls
+retain generic defaults so the optimizer can still evaluate an untuned baseline. Momentum keeps
+its separate profile.
+
+These parameters were validated with 10,000 initial capital, next-open execution, 0.1% commission
+and slippage, 95% position sizing, a five-bar minimum holding period, six daily trades, 5% stops,
+and disabled loss cooldown and drawdown breaker. Built-in defaults do not alter risk controls;
+changing these settings requires another performance evaluation.
 
 ```bash
 python run_backtest.py --coin btc --compare --interval 1h --days 730 \
-  --disable-loss-cooldown --disable-drawdown-breaker \
-  --strategy-profiles results/strategy_optimization_btc_1h_20261007/validated_profiles.json
+  --disable-loss-cooldown --disable-drawdown-breaker
 ```
+
+An optional `--strategy-profiles` JSON file overrides built-in parameter values. External
+profiles require identical coin, interval, initial capital, execution model, commission,
+slippage, position size and risk controls.
 
 Use a new output directory for a new search. Checkpoints are written after each strategy;
 this CLI does not resume trial-level studies. Larger searches should still use a frozen

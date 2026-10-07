@@ -97,3 +97,24 @@ DEFAULT_BREAKER_COOLDOWN_BARS = 720  # Bars before breaker resets (30 days for 1
 VWAP_DYNAMIC_MULTIPLIER = 1.5  # Multiplier for ATR-based dynamic deviation
 VWAP_MIN_DEVIATION = 0.005  # Minimum deviation threshold (0.5%)
 VWAP_ATR_WINDOW = 20  # ATR window for dynamic deviation calculation
+
+# BTC/1h profiles accepted by the 2026-10-07 40-trial chronological search.
+# Validation used next_open_intrabar_v2, 0.1% commission and slippage, 95% sizing,
+# 5-bar minimum holding, 6 daily trades, 5% stops, and disabled cooldown/breaker.
+BTC_1H_RSI_PARAMETERS: dict[str, int | float | bool] = {
+    "trend_filter_enabled": True,
+    "trend_filter_window": 672,
+    "trend_filter_tolerance": 0.006128353716190624,
+    "period": 12,
+    "oversold": 30,
+    "overbought": 85,
+}
+BTC_1H_VWAP_PARAMETERS: dict[str, int | float | bool] = {
+    "trend_filter_enabled": True,
+    "trend_filter_window": 48,
+    "trend_filter_tolerance": 0.0077084678522454965,
+    "window": 672,
+    "atr_window": 168,
+    "deviation_multiplier": 4.0,
+    "min_deviation": 0.006769730483419706,
+}

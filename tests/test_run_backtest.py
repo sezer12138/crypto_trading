@@ -369,3 +369,36 @@ def test_profile_argument_is_forwarded_to_comparison(monkeypatch):
     )
     run_backtest.main()
     assert captured["strategy_profiles"] == "profiles.json"
+
+
+def test_btc_hourly_defaults_use_validated_rsi_and_vwap_without_results_files():
+    data = pd.DataFrame({"low": [90.0], "high": [110.0], "close": [100.0]})
+    rsi = run_backtest.create_strategy("rsi", "BTC", "1H", data)
+    assert (rsi.period, rsi.oversold, rsi.overbought, rsi.trend_filter_window) == (12, 30, 85, 672)
+    assert rsi.trend_filter_tolerance == 0.006128353716190624
+    vwap = run_backtest.create_strategy("vwap", "btc", "1h", data)
+    assert (vwap.window, vwap.atr_window, vwap.deviation_multiplier) == (672, 168, 4.0)
+    assert vwap.min_deviation == 0.006769730483419706
+
+
+def test_optimized_defaults_do_not_apply_to_other_coins_or_intervals():
+    data = pd.DataFrame({"low": [90.0], "high": [110.0], "close": [100.0]})
+    for coin, interval in [("eth", "1h"), ("btc", "4h")]:
+        assert run_backtest.create_strategy("rsi", coin, interval, data).period == 14
+        assert run_backtest.create_strategy("vwap", coin, interval, data).window == 20
+
+
+def test_explicit_parameters_override_built_in_defaults():
+    data = pd.DataFrame({"low": [90.0], "high": [110.0], "close": [100.0]})
+    strategy = run_backtest.create_strategy("rsi", "btc", "1h", data, parameters={"period": 24})
+    assert strategy.period == 24
+    assert strategy.overbought == 85
+
+
+def test_built_in_strategy_profiles_are_independent_copies():
+    from strategies.parameter_profiles import get_strategy_profile
+
+    first = get_strategy_profile("RSI", " BTC ", "1H")
+    first["period"] = 999
+    assert get_strategy_profile("rsi", "btc", "1h")["period"] == 12
+    assert get_strategy_profile("macd", "btc", "1h") == {}

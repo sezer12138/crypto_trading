@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from historical_data import HistoricalDataFetcher
 from strategies import TradingStrategy, get_strategy
 from strategies.momentum_profiles import get_momentum_profile
+from strategies.parameter_profiles import get_strategy_profile
 from backtest import BacktestEngine, BacktestResult
 from visualization import Visualizer
 from visualization.html_report import HTMLReportGenerator
@@ -72,10 +73,16 @@ def create_strategy(
     capital: float = 10000.0,
 ) -> TradingStrategy:
     """Create a strategy with runtime parameters derived from its backtest context."""
-    if parameters and strategy_name != "momentum":
-        from optimization.strategy_search import build_strategy
+    resolved_parameters = {
+        **get_strategy_profile(strategy_name, coin, interval),
+        **(parameters or {}),
+    }
+    if resolved_parameters and strategy_name != "momentum":
+        if strategy_name in {"grid", "martingale"}:
+            from optimization.strategy_search import build_strategy
 
-        return build_strategy(strategy_name, parameters, df, capital)
+            return build_strategy(strategy_name, resolved_parameters, df, capital)
+        return get_strategy(strategy_name, **resolved_parameters)
     if strategy_name == "grid":
         lookback_bars = min(100, len(df))
         lower_price = df["low"].iloc[:lookback_bars].min()
