@@ -266,7 +266,7 @@ class TestStochasticStrategy:
         assert get_strategy("bollinger").trend_filter_enabled is True
         assert get_strategy("mean_reversion").trend_filter_enabled is True
         assert get_strategy("stochastic").trend_filter_enabled is True
-        assert get_strategy("rsi").trend_filter_enabled is False
+        assert get_strategy("rsi").trend_filter_enabled is True
 
 
 class TestStrategyFactoryComplete:

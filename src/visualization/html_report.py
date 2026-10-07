@@ -329,7 +329,7 @@ class HTMLReportGenerator:
 
         metrics_html = self._build_metrics_card(metrics)
         strategy_html = self._build_strategy_info_card(strategy_info, strategy_name, coin, days, interval, capital)
-        stats_html = self._build_trade_stats_card(metrics, buy_trades, sell_trades, avg_holding_time, max_profit, max_loss, result)
+        stats_html = f"<p>Execution: {getattr(result, 'execution_mode', 'unknown')} | Win rate and profit statistics use complete positions.</p>" + self._build_trade_stats_card(metrics, buy_trades, sell_trades, avg_holding_time, max_profit, max_loss, result)
         charts_html = self._generate_charts_html(charts_base64)
         trades_html = self._build_trades_card(trades)
         conclusion_html = self._build_conclusion_card(conclusion)
@@ -436,11 +436,17 @@ class HTMLReportGenerator:
         <div class="card">
             <h2>Trade Statistics</h2>
             <div class="summary-stats">
+                <div class="summary-stat"><div class="value">{m.get('total_round_trips', 0)}</div><div class="label">Completed Positions</div></div>
+                <div class="summary-stat"><div class="value">{m.get('average_win_pct', 0):.2f}% / {m.get('average_loss_pct', 0):.2f}%</div><div class="label">Average Win / Loss</div></div>
+                <div class="summary-stat"><div class="value">{m.get('profit_factor') if m.get('profit_factor') is not None else 'N/A'}</div><div class="label">Profit Factor</div></div>
+                <div class="summary-stat"><div class="value">${m.get('total_cost', 0):,.2f}</div><div class="label">Commission &amp; Slippage</div></div>
+                <div class="summary-stat"><div class="value">{m.get('market_exposure_pct', 0):.2f}%</div><div class="label">Market Exposure</div></div>
+                <div class="summary-stat"><div class="value">{m.get('buy_hold_return_pct', 0):.2f}%</div><div class="label">Price Return (before costs)</div></div>
                 <div class="summary-stat"><div class="value">{len(buy_trades)}</div><div class="label">Buy Count</div></div>
                 <div class="summary-stat"><div class="value">{len(sell_trades)}</div><div class="label">Sell Count</div></div>
                 <div class="summary-stat"><div class="value">{avg_holding_time}</div><div class="label">Avg Holding Time</div></div>
-                <div class="summary-stat"><div class="value" style="color: #00ff88;">+{max_profit:.2f}%</div><div class="label">Max Single Profit</div></div>
-                <div class="summary-stat"><div class="value" style="color: #ff4757;">{max_loss:.2f}%</div><div class="label">Max Single Loss</div></div>
+                <div class="summary-stat"><div class="value" style="color: #00ff88;">+{max_profit:.2f}%</div><div class="label">Max Position Profit</div></div>
+                <div class="summary-stat"><div class="value" style="color: #ff4757;">{max_loss:.2f}%</div><div class="label">Max Position Loss</div></div>
                 <div class="summary-stat"><div class="value">{m.get('trades_per_month', 0):.1f}</div><div class="label">Monthly Avg Trades</div></div>
                 <div class="summary-stat"><div class="value">{m.get('volatility_pct', 0):.2f}%</div><div class="label">Annualized Volatility</div></div>
                 <div class="summary-stat"><div class="value">${result.equity_curve.iloc[-1]:,.2f}</div><div class="label">Final Equity</div></div>
@@ -575,7 +581,7 @@ class HTMLReportGenerator:
             <h2>Strategy Ranking Comparison</h2>
             <div style="overflow-x: auto;">
                 <table>
-                    <thead><tr><th>Rank</th><th>Strategy</th><th>Total Return</th><th>Annual Return</th><th>Sharpe Ratio</th><th>Max Drawdown</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                    <thead><tr><th>Rank</th><th>Strategy</th><th>Total Return</th><th>Annual Return</th><th>Sharpe Ratio</th><th>Max Drawdown</th><th>Win Rate</th><th>Actions</th><th>Completed Positions</th><th>Cost / Capital</th><th>Profit Factor</th><th>Exposure</th></tr></thead>
                     <tbody>{comparison_table}</tbody>
                 </table>
             </div>
@@ -679,6 +685,10 @@ class HTMLReportGenerator:
                     <td class="negative">{m.get('max_drawdown_pct', 0):.2f}%</td>
                     <td>{m.get('win_rate_pct', 0):.2f}%</td>
                     <td>{m.get('total_trades', 0)}</td>
+                    <td>{m.get('total_round_trips', 0)}</td>
+                    <td>{m.get('cost_drag_pct', 0):.2f}%</td>
+                    <td>{m.get('profit_factor') if m.get('profit_factor') is not None else 'N/A'}</td>
+                    <td>{m.get('market_exposure_pct', 0):.2f}%</td>
                 </tr>
             """)
         return ''.join(rows)
@@ -723,45 +733,21 @@ class HTMLReportGenerator:
         return ''.join(cards)
 
     def _calculate_avg_holding_time(self, trades: List) -> str:
-        """Calculate average holding time -- O(n) single pass"""
-        if len(trades) < 2:
+        """Calculate holding time from complete positions, including scale-in/out fills."""
+        from backtest import summarize_closed_positions
+
+        episodes = summarize_closed_positions(trades)
+        if not episodes:
             return "N/A"
-
-        holding_times = []
-        last_buy_time = None
-        for trade in trades:
-            if trade.action == "buy":
-                last_buy_time = trade.timestamp
-            elif trade.action == "sell" and last_buy_time is not None:
-                delta = trade.timestamp - last_buy_time
-                holding_times.append(delta.total_seconds() / 3600)
-
-        if not holding_times:
-            return "N/A"
-
-        avg_hours = sum(holding_times) / len(holding_times)
-        if avg_hours >= 24:
-            return f"{avg_hours / 24:.1f} days"
-        else:
-            return f"{avg_hours:.1f} hours"
+        avg_hours = sum(p["holding_hours"] for p in episodes) / len(episodes)
+        return f"{avg_hours / 24:.1f} days" if avg_hours >= 24 else f"{avg_hours:.1f} hours"
 
     def _calculate_max_profit_loss(self, trades: List) -> tuple:
-        """Calculate max single-trade profit and loss -- O(n) single pass"""
-        max_profit = 0.0
-        max_loss = 0.0
-        last_buy_price = None
+        """Calculate net position returns, including fees and all partial fills."""
+        from backtest import summarize_closed_positions
 
-        for trade in trades:
-            if trade.action == "buy":
-                last_buy_price = trade.price
-            elif trade.action == "sell" and last_buy_price is not None:
-                profit_pct = (trade.price - last_buy_price) / last_buy_price * 100
-                if profit_pct > max_profit:
-                    max_profit = profit_pct
-                if profit_pct < max_loss:
-                    max_loss = profit_pct
-
-        return max_profit, max_loss
+        returns = [p["return_pct"] for p in summarize_closed_positions(trades)]
+        return max([0.0] + returns), min([0.0] + returns)
 
     def _generate_conclusion(self, metrics: Dict, strategy_name: str) -> str:
         """Generate single-strategy conclusion"""

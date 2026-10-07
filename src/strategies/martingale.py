@@ -17,7 +17,8 @@ Usage example:
 """
 
 import pandas as pd
-from strategies._base import TradingStrategy
+from strategies._base import TradingStrategy, PortfolioState, TradeOrder
+from typing import Optional
 
 
 class MartingaleStrategy(TradingStrategy):
@@ -52,6 +53,10 @@ class MartingaleStrategy(TradingStrategy):
         stop_loss: float = 0.05,
     ):
         super().__init__("Martingale_Strategy")
+        if base_amount <= 0 or multiplier < 1 or max_steps < 0:
+            raise ValueError(
+                "Martingale requires positive size, multiplier >= 1, and nonnegative steps"
+            )
         self.base_amount = base_amount
         self.multiplier = multiplier
         self.max_steps = max_steps
@@ -141,3 +146,23 @@ class MartingaleStrategy(TradingStrategy):
         df["signal"] = signals
         df["position"] = positions
         return df
+
+    def generate_order(
+        self,
+        bar: pd.Series,
+        previous_bar: Optional[pd.Series],
+        portfolio: PortfolioState,
+        bar_index: int,
+    ) -> Optional[TradeOrder]:
+        """Use filled cost basis and filled entry count, never a hypothetical position."""
+        if portfolio.quantity == 0:
+            return TradeOrder(1, self.base_amount)
+        change = float(bar["close"]) / portfolio.average_cost - 1
+        if change >= self.target_profit:
+            return TradeOrder(-1)
+        step = max(0, portfolio.entry_count - 1)
+        if change <= -self.stop_loss / (step + 1):
+            if step >= self.max_steps:
+                return TradeOrder(-1, force=True)
+            return TradeOrder(1, portfolio.last_entry_quantity * self.multiplier)
+        return None

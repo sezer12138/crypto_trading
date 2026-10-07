@@ -64,9 +64,18 @@ logger = logging.getLogger(__name__)
 
 
 def create_strategy(
-    strategy_name: str, coin: str, interval: str, df: pd.DataFrame
+    strategy_name: str,
+    coin: str,
+    interval: str,
+    df: pd.DataFrame,
+    parameters: Optional[dict] = None,
+    capital: float = 10000.0,
 ) -> TradingStrategy:
     """Create a strategy with runtime parameters derived from its backtest context."""
+    if parameters and strategy_name != "momentum":
+        from optimization.strategy_search import build_strategy
+
+        return build_strategy(strategy_name, parameters, df, capital)
     if strategy_name == "grid":
         lookback_bars = min(100, len(df))
         lower_price = df["low"].iloc[:lookback_bars].min()
@@ -76,6 +85,7 @@ def create_strategy(
             strategy_name,
             lower_price=lower_price - margin,
             upper_price=upper_price + margin,
+            warmup_bars=lookback_bars,
         )
     if strategy_name == "martingale":
         return get_strategy(strategy_name, base_amount=0.001, multiplier=2.0, max_steps=5)
@@ -191,6 +201,11 @@ Examples:
         help="Data source for historical data (default: binance, use okx if Binance is blocked in your region)",
     )
 
+    parser.add_argument(
+        "--strategy-profiles",
+        help="Opt-in validated strategy profiles JSON; requires matching coin, interval, capital and risk settings",
+    )
+
     return parser.parse_args()
 
 
@@ -204,6 +219,7 @@ def run_single_backtest(
     generate_html: bool = True,
     drawdown_breaker_enabled: bool = True,
     loss_cooldown_enabled: bool = True,
+    strategy_profiles: Optional[str] = None,
 ) -> Tuple[Optional[BacktestResult], Optional[pd.DataFrame]]:
     """
     Run a single backtest
@@ -268,7 +284,25 @@ def run_single_backtest(
         )
 
     # 2. Create strategy
-    strategy = create_strategy(strategy_name, coin, interval, df)
+    parameters = {}
+    if strategy_profiles is not None:
+        from optimization.strategy_profiles import read_profile
+        from optimization.strategy_search import SearchConfig
+
+        parameters = read_profile(
+            Path(strategy_profiles),
+            strategy_name,
+            SearchConfig(
+                initial_capital=capital,
+                coin=coin.lower(),
+                interval=interval,
+                drawdown_breaker_enabled=drawdown_breaker_enabled,
+                loss_cooldown_enabled=loss_cooldown_enabled,
+            ),
+        )
+    strategy = create_strategy(
+        strategy_name, coin, interval, df, parameters=parameters, capital=capital
+    )
 
     # 3. Run backtest
     engine = BacktestEngine(
@@ -323,6 +357,7 @@ def compare_strategies(
     data_source: str = None,
     drawdown_breaker_enabled: bool = True,
     loss_cooldown_enabled: bool = True,
+    strategy_profiles: Optional[str] = None,
 ) -> Dict[str, BacktestResult]:
     """
     Compare performance of multiple strategies
@@ -387,6 +422,7 @@ def compare_strategies(
             fetcher,
             drawdown_breaker_enabled=drawdown_breaker_enabled,
             loss_cooldown_enabled=loss_cooldown_enabled,
+            strategy_profiles=strategy_profiles,
         )
 
         if result:
@@ -506,6 +542,7 @@ def main() -> None:
             data_source=args.source,
             drawdown_breaker_enabled=drawdown_breaker_enabled,
             loss_cooldown_enabled=loss_cooldown_enabled,
+            strategy_profiles=args.strategy_profiles,
         )
 
     elif args.coin == "all":
@@ -523,6 +560,7 @@ def main() -> None:
                 fetcher,
                 drawdown_breaker_enabled=drawdown_breaker_enabled,
                 loss_cooldown_enabled=loss_cooldown_enabled,
+                strategy_profiles=args.strategy_profiles,
             )
 
             if result and not args.no_viz:
@@ -542,6 +580,7 @@ def main() -> None:
             fetcher,
             drawdown_breaker_enabled=drawdown_breaker_enabled,
             loss_cooldown_enabled=loss_cooldown_enabled,
+            strategy_profiles=args.strategy_profiles,
         )
 
         if result and not args.no_viz:

@@ -345,3 +345,27 @@ def test_single_run_forwards_disabled_loss_cooldown_to_engine(monkeypatch):
     assert result is not None
     assert returned_data is data
     assert captured["loss_cooldown_enabled"] is False
+
+
+def test_create_strategy_accepts_validated_parameters_without_changing_momentum():
+    data = pd.DataFrame({"low": [90.0] * 120, "high": [110.0] * 120, "close": [100.0] * 120})
+    strategy = run_backtest.create_strategy(
+        "ma_cross", "btc", "1h", data, parameters={"short_window": 24, "long_window": 168}
+    )
+    assert strategy.long_window == 168
+    momentum = run_backtest.create_strategy(
+        "momentum", "btc", "1h", data, parameters={"buy_threshold": 0.9}
+    )
+    assert momentum.buy_threshold == 0.055
+
+
+def test_profile_argument_is_forwarded_to_comparison(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        sys, "argv", ["run_backtest.py", "--compare", "--strategy-profiles", "profiles.json"]
+    )
+    monkeypatch.setattr(
+        run_backtest, "compare_strategies", lambda *args, **kwargs: captured.update(kwargs)
+    )
+    run_backtest.main()
+    assert captured["strategy_profiles"] == "profiles.json"

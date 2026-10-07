@@ -32,6 +32,8 @@ from typing import Dict, List, Optional, Any
 import numpy as np
 import pandas as pd
 
+from strategies._base import PortfolioState, TradeOrder
+
 from strategies.constants import (
     DEFAULT_MAX_DRAWDOWN_PCT,
     DEFAULT_MAX_TRADES_PER_DAY,
@@ -50,6 +52,7 @@ logger = logging.getLogger(__name__)
 Path("logs").mkdir(parents=True, exist_ok=True)
 
 # Backtest constants
+BACKTEST_MODEL_VERSION = "next_open_intrabar_v2"
 SIGNAL_BUY = 1
 SIGNAL_SELL = -1
 SIGNAL_HOLD = 0
@@ -98,6 +101,8 @@ class Trade:
     value: float
     coin: str
     strategy_signal: int
+    commission: float = 0.0
+    slippage_cost: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert trade record to dictionary format"""
@@ -109,7 +114,38 @@ class Trade:
             "value": self.value,
             "coin": self.coin,
             "signal": self.strategy_signal,
+            "commission": self.commission,
+            "slippage_cost": self.slippage_cost,
         }
+
+
+def summarize_closed_positions(trades: List[Trade]) -> List[Dict[str, float]]:
+    """Summarize flat-to-flat positions using average-cost allocation for partial exits."""
+    quantity = cost_basis = episode_cost = episode_pnl = 0.0
+    episode_start = None
+    episodes = []
+    for trade in trades:
+        if trade.action == ACTION_BUY:
+            if quantity <= 1e-12:
+                episode_start = trade.timestamp
+            quantity += trade.quantity
+            cost_basis += trade.value
+            episode_cost += trade.value
+        elif trade.action == ACTION_SELL and quantity > 0:
+            allocated_cost = cost_basis * min(trade.quantity / quantity, 1.0)
+            episode_pnl += trade.value - allocated_cost
+            cost_basis -= allocated_cost
+            quantity = max(0.0, quantity - trade.quantity)
+            if quantity <= 1e-12:
+                episodes.append(
+                    {
+                        "profit": episode_pnl,
+                        "return_pct": episode_pnl / episode_cost * 100,
+                        "holding_hours": (trade.timestamp - episode_start).total_seconds() / 3600,
+                    }
+                )
+                quantity = cost_basis = episode_cost = episode_pnl = 0.0
+    return episodes
 
 
 @dataclass
@@ -142,6 +178,7 @@ class BacktestResult:
     metrics: Dict[str, float] = field(default_factory=dict)
     decision_log: List[Dict[str, Any]] = field(default_factory=list)
     initial_capital: Optional[float] = None
+    execution_mode: str = "next_open"
 
     def add_trade(self, trade: Trade) -> None:
         """
@@ -220,24 +257,19 @@ class BacktestResult:
             sharpe_ratio = 0.0
 
         # Maximum drawdown
-        cummax = self.equity_curve.cummax()
+        cummax = self.equity_curve.cummax().clip(lower=starting_equity)
         drawdown = (self.equity_curve - cummax) / cummax
         max_drawdown = drawdown.min() * 100
 
-        # Win rate based on net round-trip cash flow, including commissions and slippage.
-        profitable_sells = 0
-        total_sells = 0
-        last_buy_value = None
-        for trade in self.trades:
-            if trade.action == "buy":
-                last_buy_value = trade.value
-            elif trade.action == "sell":
-                total_sells += 1
-                if last_buy_value is not None and trade.value > last_buy_value:
-                    profitable_sells += 1
-                last_buy_value = None
-
-        win_rate = (profitable_sells / total_sells * 100) if total_sells > 0 else 0.0
+        episodes = summarize_closed_positions(self.trades)
+        episode_profits = [p["profit"] for p in episodes]
+        episode_returns = [p["return_pct"] for p in episodes]
+        holding_hours = [p["holding_hours"] for p in episodes]
+        wins = [r for r in episode_returns if r > 0]
+        losses = [r for r in episode_returns if r <= 0]
+        win_rate = len(wins) / len(episode_returns) * 100 if episode_returns else 0.0
+        gross_profit = sum(p for p in episode_profits if p > 0)
+        gross_loss = -sum(p for p in episode_profits if p < 0)
 
         # Trade statistics
         num_trades = len(self.trades)
@@ -252,6 +284,13 @@ class BacktestResult:
             "win_rate_pct": round(win_rate, 2),
             "total_trades": num_trades,
             "trades_per_month": round(trades_per_month, 2),
+            "total_round_trips": len(episode_returns),
+            "average_win_pct": round(float(np.mean(wins)), 2) if wins else 0.0,
+            "average_loss_pct": round(float(np.mean(losses)), 2) if losses else 0.0,
+            "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else None,
+            "median_holding_hours": (
+                round(float(np.median(holding_hours)), 2) if holding_hours else 0.0
+            ),
         }
 
         return self.metrics
@@ -264,6 +303,8 @@ class BacktestResult:
             filepath: Save path
         """
         log_data = {
+            "execution_model": BACKTEST_MODEL_VERSION,
+            "execution_mode": self.execution_mode,
             "metrics": self.metrics,
             "trades": [t.to_dict() for t in self.trades],
             "decisions": self.decision_log,
@@ -298,6 +339,7 @@ class BacktestEngine:
         max_drawdown_pct: Max drawdown circuit breaker percentage (default 0.20 = 20%)
         drawdown_breaker_enabled: Whether to enable the drawdown circuit breaker (default True)
         loss_cooldown_enabled: Whether to pause entries after consecutive losses (default True)
+        execution_mode: next_open (default) or explicit same_close compatibility timing.
         log_decisions: When True, append a per-bar decision row to ``BacktestResult.decision_log``
             (default False — skipped to avoid ~N dict allocations on long backtests).
 
@@ -343,7 +385,11 @@ class BacktestEngine:
         breaker_cooldown_bars: int = 0,
         drawdown_breaker_enabled: bool = True,
         loss_cooldown_enabled: bool = True,
+        execution_mode: str = "next_open",
     ):
+        if execution_mode not in {"next_open", "same_close"}:
+            raise ValueError("execution_mode must be next_open or same_close")
+        self.execution_mode = execution_mode
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
         self.slippage = slippage
@@ -373,6 +419,10 @@ class BacktestEngine:
         self._consecutive_losses = 0
         self._loss_cooldown_until = -1
         self._breaker_triggered_at = -1
+        self._entry_count = 0
+        self._last_entry_quantity = 0.0
+        self._episode_pnl = 0.0
+        self._stop_price = 0.0
 
         logger.info("Backtest engine initialized")
         logger.info(f"   Initial capital: ${initial_capital:,.2f}")
@@ -395,220 +445,234 @@ class BacktestEngine:
             logger.info(f"   Breaker cooldown: {breaker_cooldown_bars} bars")
 
     def run_backtest(self, df: pd.DataFrame, strategy: object, coin: str = "BTC") -> BacktestResult:
+        """Run causal next-open execution, with gap-aware intrabar protective stops.
+
+        Signals are observed at close and orders fill at the following open. Protective
+        stops are active immediately after entry and use only previously known ATR.
+        ``same_close`` is an explicit compatibility mode for historical experiments.
+        Execution-aware strategies generate orders from actual filled inventory.
         """
-        Run backtest
-
-        Executes a backtest on historical data using the given strategy.
-
-        Args:
-            df: DataFrame containing price data, must have a 'close' column
-            strategy: Trading strategy object, must implement generate_signals method
-            coin: Coin name (for logging and records)
-
-        Returns:
-            BacktestResult object containing complete backtest results
-
-        Raises:
-            ValueError: If input data is invalid
-        """
-        result = BacktestResult(initial_capital=self.initial_capital)
-
-        if df.empty:
-            raise ValueError("Input data is empty")
-        if "close" not in df.columns:
-            raise ValueError("Data missing 'close' column")
-
+        if df.empty or "close" not in df:
+            raise ValueError("Input data must contain nonempty close prices")
+        if self.execution_mode == "next_open" and "open" not in df:
+            raise ValueError("next_open execution requires an open column")
         self.reset()
-
+        result = BacktestResult(
+            initial_capital=self.initial_capital, execution_mode=self.execution_mode
+        )
         df = strategy.generate_signals(df.copy())
+        if "signal" not in df:
+            raise ValueError("Strategy did not generate signal column")
+        prices = df["close"].to_numpy(dtype=float)
+        opens = df["open"].to_numpy(dtype=float) if "open" in df else prices
+        lows = df["low"].to_numpy(dtype=float) if "low" in df else prices
+        if (
+            not np.isfinite(prices).all()
+            or not np.isfinite(opens).all()
+            or (prices <= 0).any()
+            or (opens <= 0).any()
+        ):
+            raise ValueError("Execution prices must be finite and positive")
+        signals = df["signal"].to_numpy(dtype=int)
+        use_atr = self.use_atr_stop_loss or getattr(strategy, "use_atr_stop_loss", False)
+        atr_multiplier = (
+            getattr(strategy, "multiplier", self.atr_stop_loss_multiplier)
+            if getattr(strategy, "use_atr_stop_loss", False)
+            else self.atr_stop_loss_multiplier
+        )
+        atr = None
+        if use_atr and "high" in df and "low" in df:
+            if "atr" in df:
+                atr = df["atr"].shift(1).to_numpy(dtype=float)
+            else:
+                previous = df["close"].shift(1)
+                tr = pd.concat(
+                    [
+                        df["high"] - df["low"],
+                        (df["high"] - previous).abs(),
+                        (df["low"] - previous).abs(),
+                    ],
+                    axis=1,
+                ).max(axis=1)
+                atr = tr.ewm(span=14, adjust=False).mean().shift(1).to_numpy(dtype=float)
+        equity = np.empty(len(df))
+        pending_order = None
+        pending_exit = None
+        exposure_bars = blocked_entries = deferred_exits = 0
 
-        if "signal" not in df.columns:
-            raise ValueError("Strategy did not generate 'signal' column")
-
-        timestamps = df.index
-        prices = df["close"].values
-        signals = df["signal"].values.astype(int)
-        equity_curve = np.empty(len(df))
-
-        # Pre-compute ATR for dynamic stop-loss (if enabled)
-        atr_values = None
-        atr_window = 14
-        if self.use_atr_stop_loss and "high" in df.columns and "low" in df.columns:
-            high = df["high"].values
-            low = df["low"].values
-            close_prev = np.roll(df["close"].values, 1)
-            close_prev[0] = df["close"].values[0]
-            tr = np.maximum(
-                high - low,
-                np.maximum(
-                    np.abs(high - close_prev),
-                    np.abs(low - close_prev),
-                ),
-            )
-            # Exponential moving average of true range, shifted to avoid look-ahead
-            atr_raw = pd.Series(tr).ewm(span=atr_window, adjust=False).mean().shift(1).values
-            atr_values = atr_raw
-            logger.info(
-                f"   ATR stop-loss: enabled (multiplier={self.atr_stop_loss_multiplier}, window={atr_window})"
-            )
-
-        logger.info(f"Starting backtest for {coin}...")
-        logger.info(f"   Strategy: {strategy.name}")
-        logger.info(f"   Data points: {len(df)}")
-
-        for i in range(len(df)):
-            timestamp = timestamps[i]
-            price = prices[i]
+        def make_order(i: int) -> Optional[TradeOrder]:
+            if hasattr(strategy, "generate_order"):
+                state = PortfolioState(
+                    self.cash,
+                    self.position,
+                    self.position_value,
+                    self._entry_count,
+                    self._last_entry_quantity,
+                )
+                return strategy.generate_order(df.iloc[i], df.iloc[i - 1] if i else None, state, i)
             signal = int(signals[i])
+            return TradeOrder(signal) if signal in (SIGNAL_BUY, SIGNAL_SELL) else None
 
-            current_day = timestamp.date() if hasattr(timestamp, "date") else timestamp
+        for i, timestamp in enumerate(df.index):
+            opening = opens[i] if self.execution_mode == "next_open" else prices[i]
+            current_day = timestamp.date()
             if self._current_day != current_day:
-                self._current_day = current_day
-                self._trades_today = 0
+                self._current_day, self._trades_today = current_day, 0
+            if (
+                self._stopped
+                and self.breaker_cooldown_bars > 0
+                and i - self._breaker_triggered_at >= self.breaker_cooldown_bars
+            ):
+                self._stopped = False
+                self._peak_equity = self.cash
+            if self._stopped:
+                equity[i] = self.cash
+                pending_order = pending_exit = None
+                continue
+            order = pending_order if self.execution_mode == "next_open" else make_order(i)
+            pending_order = None
+            risk_exit = False
+            held_at_open = self.position > 0
 
-            total_value = self.cash + self.position * price
-            if total_value > self._peak_equity:
-                self._peak_equity = total_value
-            drawdown = (
-                (self._peak_equity - total_value) / self._peak_equity
-                if self._peak_equity > 0
-                else 0
-            )
-            if self.drawdown_breaker_enabled and drawdown >= self.max_drawdown_pct:
+            # Gap protection takes precedence over an outstanding entry or normal exit.
+            opening_equity = self.cash + self.position * opening
+            opening_drawdown = 1 - opening_equity / self._peak_equity
+            if self.drawdown_breaker_enabled and opening_drawdown >= self.max_drawdown_pct:
                 if self.position > 0:
-                    self._execute_sell(
-                        timestamp, price, coin, result, FORCED_SELL_SIGNAL, force=True
-                    )
-                    self._trades_today += 1
+                    self._sell(timestamp, opening, coin, result, TradeOrder(-1, force=True), i)
+                    risk_exit = True
                 self._stopped = True
                 self._breaker_triggered_at = i
-            if self._stopped:
-                if (
-                    self.breaker_cooldown_bars > 0
-                    and i - self._breaker_triggered_at >= self.breaker_cooldown_bars
-                ):
-                    self._stopped = False
-                    self._peak_equity = self.cash
-                    self._breaker_triggered_at = -1
-                    logger.info(
-                        f"Breaker cooldown elapsed at bar {i}, trading resumed "
-                        f"(equity: ${self.cash:,.2f})"
-                    )
-                else:
-                    equity_curve[i] = self.cash
-                    continue
+            elif self.position > 0 and opening <= self._stop_price:
+                self._sell(timestamp, opening, coin, result, TradeOrder(-1, force=True), i)
+                risk_exit = True
 
-            if self.position > 0:
-                entry_price = self.position_value / self.position
-                stop_triggered = False
-                if self.use_atr_stop_loss and atr_values is not None:
-                    current_atr = atr_values[i]
-                    if current_atr > 0:
-                        stop_distance = self.atr_stop_loss_multiplier * current_atr
-                        if (entry_price - price) >= stop_distance:
-                            stop_triggered = True
-                elif (entry_price - price) / entry_price >= self.stop_loss_pct:
-                    stop_triggered = True
-
-                if stop_triggered:
-                    pre_sell_entry = entry_price
-                    self._execute_sell(timestamp, price, coin, result, signal, force=True)
-                    self._trades_today += 1
-                    if self.loss_cooldown_enabled:
-                        # Track consecutive stop-losses for cooldown
-                        if price < pre_sell_entry:
-                            self._consecutive_losses += 1
-                            if self._consecutive_losses >= self.max_consecutive_losses:
-                                self._loss_cooldown_until = i + self.consecutive_loss_cooldown
-                                logger.warning(
-                                    f"Consecutive loss limit ({self.max_consecutive_losses}) "
-                                    f"reached, cooldown until bar {self._loss_cooldown_until}"
-                                )
-                                self._consecutive_losses = 0
-                        else:
-                            self._consecutive_losses = 0
-
-            can_sell = self._entry_bar < 0 or (i - self._entry_bar >= self.min_holding_bars)
-
-            # Check loss cooldown before allowing new buy
-            in_loss_cooldown = (
-                self.loss_cooldown_enabled
-                and self._loss_cooldown_until >= 0
-                and i < self._loss_cooldown_until
-            )
-
-            if (
-                signal == SIGNAL_BUY
-                and self.position == 0
-                and self._trades_today < self.max_trades_per_day
-                and not in_loss_cooldown
-            ):
-                self._execute_buy(timestamp, price, coin, result, signal)
-                self._entry_bar = i
-                self._trades_today += 1
-
-            elif signal == SIGNAL_SELL and self.position > 0 and can_sell:
-                entry_price = self.position_value / self.position if self.position > 0 else 0
-                self._execute_sell(timestamp, price, coin, result, signal)
-                self._trades_today += 1
-                if self.loss_cooldown_enabled:
-                    # Reset consecutive loss counter on profitable regular sell
-                    if price >= entry_price:
-                        self._consecutive_losses = 0
+            if risk_exit or self._stopped:
+                pending_exit = None
+            else:
+                if order is not None and order.signal == SIGNAL_SELL and self.position > 0:
+                    if pending_exit is None or order.force or order.quantity is None:
+                        pending_exit = order
+                    elif pending_exit.quantity is not None:
+                        # Preserve every crossed grid level while an exit is deferred.
+                        pending_exit = TradeOrder(
+                            SIGNAL_SELL, min(self.position, pending_exit.quantity + order.quantity)
+                        )
+                if pending_exit is not None and self.position > 0:
+                    if pending_exit.force or i - self._entry_bar >= self.min_holding_bars:
+                        self._sell(timestamp, opening, coin, result, pending_exit, i)
+                        pending_exit = None
                     else:
-                        self._consecutive_losses += 1
-                        if self._consecutive_losses >= self.max_consecutive_losses:
-                            self._loss_cooldown_until = i + self.consecutive_loss_cooldown
-                            logger.warning(
-                                f"Consecutive loss limit ({self.max_consecutive_losses}) "
-                                f"reached, cooldown until bar {self._loss_cooldown_until}"
+                        deferred_exits += 1
+                elif order is not None and order.signal == SIGNAL_BUY:
+                    sized = order.quantity is not None
+                    cooldown = self.loss_cooldown_enabled and i < self._loss_cooldown_until
+                    allowed = (
+                        (sized or self.position == 0)
+                        and self._trades_today < self.max_trades_per_day
+                        and not cooldown
+                    )
+                    if allowed:
+                        before = self.position
+                        self._execute_buy(
+                            timestamp, opening, coin, result, SIGNAL_BUY, order.quantity
+                        )
+                        if self.position > before:
+                            held_at_open = True
+                            if before == 0:
+                                self._entry_bar = i
+                            self._trades_today += 1
+                            average = self.position_value / self.position
+                            distance = (
+                                atr_multiplier * atr[i]
+                                if atr is not None and np.isfinite(atr[i]) and atr[i] > 0
+                                else average * self.stop_loss_pct
                             )
-                            self._consecutive_losses = 0
+                            self._stop_price = average - distance
+                        else:
+                            blocked_entries += 1
+                    elif self.position == 0 or sized:
+                        blocked_entries += 1
 
-            # Record end-of-bar equity after all executions and their costs.
-            total_value = self.cash + self.position * price
-            equity_curve[i] = total_value
-
+            # Use the bar low for stop detection, but never assume a gap filled at the stop.
+            stop_observation = lows[i] if self.execution_mode == "next_open" else prices[i]
+            if self.position > 0 and stop_observation <= self._stop_price:
+                self._sell(
+                    timestamp,
+                    min(opening, self._stop_price),
+                    coin,
+                    result,
+                    TradeOrder(-1, force=True),
+                    i,
+                )
+                pending_exit = None
+                risk_exit = True
+            total_value = self.cash + self.position * prices[i]
+            self._peak_equity = max(self._peak_equity, total_value)
+            if (
+                self.drawdown_breaker_enabled
+                and 1 - total_value / self._peak_equity >= self.max_drawdown_pct
+            ):
+                if self.position > 0:
+                    self._sell(timestamp, prices[i], coin, result, TradeOrder(-1, force=True), i)
+                    total_value = self.cash
+                    risk_exit = True
+                self._stopped = True
+                self._breaker_triggered_at = i
+                pending_exit = None
+            equity[i] = total_value
+            exposure_bars += int(held_at_open or self.position > 0)
+            if (
+                self.execution_mode == "next_open"
+                and i < len(df) - 1
+                and not self._stopped
+                and not risk_exit
+            ):
+                pending_order = make_order(i)
             if self.log_decisions:
                 result.add_decision(
-                    timestamp=timestamp,
-                    decision=SIGNAL_TO_ACTION[signal],
-                    reason=(
-                        f"Signal: {signal}, Price: {price:.2f}, "
-                        f"Cash: {self.cash:.2f}, Position: {self.position:.6f}"
+                    timestamp,
+                    SIGNAL_TO_ACTION.get(int(signals[i]), ACTION_HOLD),
+                    (
+                        "Close signal observed; next-open execution"
+                        if self.execution_mode == "next_open"
+                        else "Compatibility close execution"
                     ),
-                    price=price,
+                    price=prices[i],
                     cash=self.cash,
                     position=self.position,
                     total_value=total_value,
-                    signal=signal,
+                    signal=int(signals[i]),
                 )
 
         if self.position > 0:
-            final_price = df["close"].iloc[-1]
-            self._execute_sell(
-                df.index[-1], final_price, coin, result, int(signals[-1]), force=True
+            self._sell(
+                df.index[-1], prices[-1], coin, result, TradeOrder(-1, force=True), len(df) - 1
             )
-            equity_curve[-1] = self.cash
-
-        result.equity_curve = pd.Series(equity_curve, index=timestamps)
-        daily_equity = result.equity_curve.resample("1D").last().dropna()
-        result.daily_returns = daily_equity.pct_change().dropna()
+            equity[-1] = self.cash
+        result.equity_curve = pd.Series(equity, index=df.index)
+        daily = result.equity_curve.resample("1D").last().dropna()
+        result.daily_returns = daily.pct_change()
+        result.daily_returns.iloc[0] = daily.iloc[0] / self.initial_capital - 1
         result.cumulative_returns = (result.equity_curve / self.initial_capital - 1) * 100
-
         result.calculate_metrics()
-
-        total_cost = 0.0
-        for trade in result.trades:
-            total_cost += trade.value * (self.commission_rate + self.slippage)
-        result.metrics["total_cost"] = round(total_cost, 2)
-        result.metrics["cost_drag_pct"] = round(total_cost / self.initial_capital * 100, 2)
-
-        logger.info("Backtest completed")
-        logger.info(f"   Final assets: ${result.equity_curve.iloc[-1]:,.2f}")
-        logger.info(f"   Total return: {result.metrics.get('total_return_pct', 0):.2f}%")
-        logger.info(f"   Trade count: {len(result.trades) // 2}")
-
+        total_cost = sum(t.commission + t.slippage_cost for t in result.trades)
+        result.metrics.update(
+            {
+                "total_cost": round(total_cost, 2),
+                "cost_drag_pct": round(total_cost / self.initial_capital * 100, 2),
+                "market_exposure_pct": round(exposure_bars / len(df) * 100, 2),
+                "blocked_entry_orders": blocked_entries,
+                "deferred_exit_bars": deferred_exits,
+                "buy_hold_return_pct": round((prices[-1] / prices[0] - 1) * 100, 2),
+            }
+        )
+        logger.info(
+            "Backtest completed | %s | Return: %.2f%% | Completed positions: %s",
+            strategy.name,
+            result.metrics.get("total_return_pct", 0),
+            result.metrics.get("total_round_trips", 0),
+        )
         return result
 
     def _execute_buy(
@@ -618,42 +682,41 @@ class BacktestEngine:
         coin: str,
         result: BacktestResult,
         signal: int,
+        quantity: Optional[float] = None,
     ) -> None:
-        """
-        Execute buy operation
-
-        Args:
-            timestamp: Trade time
-            price: Current price
-            coin: Coin symbol
-            result: BacktestResult object
-            signal: Strategy signal that triggered this trade
-        """
+        """Fill a cash-budgeted entry or a requested quantity under the exposure cap."""
         executed_price = price * (1 + self.slippage)
-
-        position_value = self.cash * self.position_size
-        commission = position_value * self.commission_rate
-        quantity = (position_value - commission) / executed_price
-
-        self.position = quantity
-        self.position_value = position_value
-        self.cash -= position_value
-
-        trade = Trade(
-            timestamp=timestamp,
-            action=ACTION_BUY,
-            price=executed_price,
-            quantity=quantity,
-            value=position_value,
-            coin=coin,
-            strategy_signal=signal,
-        )
-        result.add_trade(trade)
-
-        logger.debug(
-            f"   Buy @ ${executed_price:.2f}, "
-            f"Quantity: {quantity:.6f}, "
-            f"Value: ${position_value:.2f}"
+        if quantity is None:
+            budget = self.cash * self.position_size
+            bought = budget * (1 - self.commission_rate) / executed_price
+        else:
+            equity = self.cash + self.position * price
+            capacity = max(0.0, equity * self.position_size - self.position * price)
+            budget = min(
+                self.cash, capacity, quantity * executed_price / (1 - self.commission_rate)
+            )
+            bought = budget * (1 - self.commission_rate) / executed_price
+        if bought <= 1e-12:
+            return
+        if self.position == 0:
+            self._episode_pnl = 0.0
+        self.cash -= budget
+        self.position += bought
+        self.position_value += budget
+        self._entry_count += 1
+        self._last_entry_quantity = bought
+        result.add_trade(
+            Trade(
+                timestamp,
+                ACTION_BUY,
+                executed_price,
+                bought,
+                budget,
+                coin,
+                signal,
+                budget * self.commission_rate,
+                bought * (executed_price - price),
+            )
         )
 
     def _execute_sell(
@@ -664,53 +727,76 @@ class BacktestEngine:
         result: BacktestResult,
         signal: int,
         force: bool = False,
-    ) -> None:
-        """
-        Execute sell operation
-
-        Args:
-            timestamp: Trade time
-            price: Current price
-            coin: Coin symbol
-            result: BacktestResult object
-            signal: Strategy signal that triggered this trade (overridden to
-                ``FORCED_SELL_SIGNAL`` when ``force`` is True)
-            force: Whether this is a forced liquidation (default False)
-        """
+        quantity: Optional[float] = None,
+    ) -> float:
+        """Fill a partial or complete exit and return net realized profit."""
+        if self.position <= 0:
+            return 0.0
+        sold = self.position if quantity is None else min(quantity, self.position)
+        if sold <= 0:
+            return 0.0
         executed_price = price * (1 - self.slippage)
-
-        sell_quantity = self.position
-        sell_value = sell_quantity * executed_price
-        commission = sell_value * self.commission_rate
-        net_value = sell_value - commission
-
-        self.cash += net_value
-        self.position = 0.0
-        self.position_value = 0.0
-
-        trade = Trade(
-            timestamp=timestamp,
-            action=ACTION_SELL,
-            price=executed_price,
-            quantity=sell_quantity,
-            value=net_value,
-            coin=coin,
-            strategy_signal=FORCED_SELL_SIGNAL if force else signal,
+        gross = sold * executed_price
+        commission = gross * self.commission_rate
+        net = gross - commission
+        allocated = self.position_value * sold / self.position
+        self.cash += net
+        self.position -= sold
+        self.position_value -= allocated
+        self._episode_pnl += net - allocated
+        if self.position <= 1e-12:
+            self.position = self.position_value = 0.0
+            self._entry_count = 0
+            self._last_entry_quantity = 0.0
+            self._entry_bar = -1
+            self._stop_price = 0.0
+        result.add_trade(
+            Trade(
+                timestamp,
+                ACTION_SELL,
+                executed_price,
+                sold,
+                net,
+                coin,
+                FORCED_SELL_SIGNAL if force else signal,
+                commission,
+                sold * (price - executed_price),
+            )
         )
-        result.add_trade(trade)
+        return net - allocated
 
-        logger.debug(
-            f"   Sell @ ${executed_price:.2f}, "
-            f"Quantity: {sell_quantity:.6f}, "
-            f"Net proceeds: ${net_value:.2f}"
-        )
+    def _sell(
+        self,
+        timestamp: datetime,
+        price: float,
+        coin: str,
+        result: BacktestResult,
+        order: TradeOrder,
+        bar_index: int,
+    ) -> None:
+        """Execute an exit and update cooldown only when the entire position closes."""
+        self._execute_sell(timestamp, price, coin, result, SIGNAL_SELL, order.force, order.quantity)
+        self._trades_today += 1
+        if self.position == 0 and self.loss_cooldown_enabled:
+            self._consecutive_losses = self._consecutive_losses + 1 if self._episode_pnl < 0 else 0
+            if self._consecutive_losses >= self.max_consecutive_losses:
+                self._loss_cooldown_until = bar_index + self.consecutive_loss_cooldown
+                logger.warning(
+                    "Consecutive loss limit (%s) reached, cooldown until bar %s",
+                    self.max_consecutive_losses,
+                    self._loss_cooldown_until,
+                )
+                self._consecutive_losses = 0
 
     def reset(self) -> None:
-        """Reset engine state (cash, position, risk-management counters) to initial values."""
+        """Reset all cash, inventory, order-accounting, and risk state for a fresh run."""
         self.cash = self.initial_capital
-        self.position = 0.0
-        self.position_value = 0.0
+        self.position = self.position_value = 0.0
         self._entry_bar = -1
+        self._entry_count = 0
+        self._last_entry_quantity = 0.0
+        self._episode_pnl = 0.0
+        self._stop_price = 0.0
         self._trades_today = 0
         self._current_day = None
         self._peak_equity = self.initial_capital
@@ -718,7 +804,6 @@ class BacktestEngine:
         self._consecutive_losses = 0
         self._loss_cooldown_until = -1
         self._breaker_triggered_at = -1
-        logger.info("Backtest engine reset")
 
 
 if __name__ == "__main__":

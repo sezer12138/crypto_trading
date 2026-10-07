@@ -441,9 +441,9 @@ rsi < overbought  AND  rsi[i-1] >= overbought  # default overbought=70
 | `period` | 14 | RSI calculation period |
 | `oversold` | 30 | Oversold threshold |
 | `overbought` | 70 | Overbought threshold |
-| `trend_filter_enabled` | `False` | Suppress signals in strong trends |
+| `trend_filter_enabled` | `True` | Suppress new entries in strong trends |
 | `trend_filter_window` | 50 | Trend filter MA window |
-| `trend_filter_tolerance` | 0.03 | Max deviation from MA (3%) |
+| `trend_filter_tolerance` | 0.03 | Max deviation from MA for new entries (3%) |
 
 **Code reference**:
 ```python
@@ -460,7 +460,7 @@ df.loc[(df["rsi"] > self.oversold) & (df["rsi"].shift(1) <= self.oversold), "sig
 # src/strategies/rsi.py:88-89 — Trend filter (optional)
 if self.trend_filter_enabled:
     df = add_trend_filter(df, self.trend_filter_window, self.trend_filter_tolerance)
-    df.loc[~df["trend_filter"], "signal"] = 0
+    df.loc[~df["trend_filter"] & (df["signal"] == 1), "signal"] = 0
 ```
 
 ---
@@ -497,7 +497,7 @@ close < upper_band  AND  close[i-1] >= upper_band[i-1]
 | `num_std` | 2.0 | Standard deviation multiplier |
 | `trend_filter_enabled` | `True` | Suppress signals in strong trends |
 | `trend_filter_window` | 50 | Trend filter MA window |
-| `trend_filter_tolerance` | 0.03 | Max deviation from MA (3%) |
+| `trend_filter_tolerance` | 0.03 | Max deviation from MA for new entries (3%) |
 
 **Code reference**:
 ```python
@@ -542,7 +542,7 @@ zscore = (close - mean) / std
 | `exit_z` | 0.5 | Z-score exit threshold |
 | `trend_filter_enabled` | `True` | Suppress signals in strong trends |
 | `trend_filter_window` | 50 | Trend filter MA window |
-| `trend_filter_tolerance` | 0.03 | Max deviation from MA (3%) |
+| `trend_filter_tolerance` | 0.03 | Max deviation from MA for new entries (3%) |
 
 **Code reference**:
 ```python
@@ -554,7 +554,7 @@ df["zscore"] = (df["close"] - df["mean"]) / df["std"].replace(0, float("nan"))
 # src/strategies/mean_reversion.py:108-114 — Signal generation
 df.loc[df["zscore"] < -self.entry_z, "signal"] = 1    # oversold buy
 df.loc[df["zscore"] > self.entry_z, "signal"] = -1     # overbought sell
-df.loc[abs(df["zscore"]) < self.exit_z, "signal"] = 0  # exit on reversion
+df.loc[abs(df["zscore"]) < self.exit_z, "signal"] = -1  # exit on reversion
 
 # src/strategies/mean_reversion.py:117 — Convert to event-based signals
 df = convert_to_event_signals(df)
@@ -593,7 +593,7 @@ k < d  AND  k[i-1] >= d[i-1]  AND  k > 80     # crossover in overbought zone
 | `smooth` | 3 | %K pre-smoothing period |
 | `trend_filter_enabled` | `True` | Suppress signals in strong trends |
 | `trend_filter_window` | 50 | Trend filter MA window |
-| `trend_filter_tolerance` | 0.03 | Max deviation from MA (3%) |
+| `trend_filter_tolerance` | 0.03 | Max deviation from MA for new entries (3%) |
 
 **Code reference**:
 ```python
@@ -625,7 +625,8 @@ vwap          = rolling_sum(typical_price * volume, window) / rolling_sum(volume
 vwap_dev      = (close - vwap) / vwap
 
 # Dynamic deviation (when dynamic_deviation=True):
-atr           = rolling_mean(high - low, atr_window)
+true_range    = max(high-low, abs(high-prev_close), abs(low-prev_close))
+atr           = rolling_mean(true_range, atr_window)
 dynamic_dev   = max(atr / close * 1.5, 0.005)   # 1.5x ATR, floored at 0.5%
 ```
 
@@ -818,12 +819,12 @@ df = convert_to_event_signals(df)
 
 ### `add_trend_filter(df, trend_window, trend_tolerance)`
 
-Adds a `trend_filter` boolean column. `True` where price is within `trend_tolerance` (default 3%) of the trend MA, indicating a ranging market. Strategies can zero out signals where `trend_filter` is `False` to avoid mean-reversion trades during strong trends.
+Adds a `trend_filter` boolean column. `True` where price is within `trend_tolerance` (default 3%) of the trend MA, indicating a ranging market. Strategies can zero out buy signals where `trend_filter` is `False` to avoid mean-reversion trades during strong trends.
 
 ```python
 # Used by: rsi, bollinger, stochastic, mean_reversion (when trend_filter_enabled=True)
 df = add_trend_filter(df, trend_window=50, trend_tolerance=0.03)
-df.loc[~df["trend_filter"], "signal"] = 0
+df.loc[~df["trend_filter"] & (df["signal"] == 1), "signal"] = 0
 ```
 
 ### `forward_fill_position(df)`
@@ -942,57 +943,63 @@ The factory passes all `**kwargs` to the strategy constructor, so any constructo
 
 ### Backtest Engine Internals
 
-The `BacktestEngine` in `src/backtest.py` processes each bar in sequence. Here is the execution flow:
+The default execution mode is `next_open`: indicators and signals are observed at bar close,
+then orders execute at the following bar's open with commission and slippage. The last bar's
+signal cannot open a new position. Remaining inventory is liquidated at the final close.
+An explicit `execution_mode="same_close"` constructor option supports older timing experiments;
+it is not the default and does not restore the old strategy or accounting bugs.
 
-```
-For each bar i in the data:
-  1. DAY TRACKING: Reset daily trade count on new day
-  2. DRAWDOWN CHECK: If drawdown_breaker_enabled and drawdown >= max_drawdown_pct,
-     force-liquidate and stop trading
-  3. STOP-LOSS CHECK: If position loss >= stop_loss_pct, force sell
-  4. SIGNAL CHECK:
-     - If signal==1 and no position and trades_today < max_trades_per_day --> BUY
-     - If signal==-1 and in position and bars_since_entry >= min_holding_bars --> SELL
-  5. EQUITY TRACKING: Record total_value = cash + position * price
-```
+For each bar, the engine:
 
-**Code reference** (`src/backtest.py:389-461`):
-```python
-for i in range(len(df)):
-    # ... risk management checks ...
+1. Resets the daily entry counter and applies any breaker cooldown.
+2. Checks opening equity and protective-stop gaps before executing outstanding orders.
+3. Fills the previous close's market order at the open. Early sell events remain pending until
+   the holding minimum expires. Deferred partial exits accumulate, capped to actual inventory.
+4. Checks the low against the protective stop. A gap fills at the opening price; a normal
+   intrabar crossing fills at the stop threshold, with adverse slippage applied.
+5. Marks equity at the close, checks the equity breaker, and constructs the next order.
 
-    # Min holding period check
-    can_sell = self._entry_bar < 0 or (i - self._entry_bar >= self.min_holding_bars)
+Protective stops can execute on the entry bar. A risk liquidation cancels stale orders and
+prevents same-bar re-entry. The equity breaker checks opening and closing equity; it does not
+infer the order of intrabar highs and lows. An equity breaker or end-of-data liquidation can
+still execute at the observed close, independently of next-open strategy orders.
 
-    if signal == SIGNAL_BUY and self.position == 0 and self._trades_today < self.max_trades_per_day:
-        self._execute_buy(timestamp, price, coin, result, df.iloc[i])
-        self._entry_bar = i
-        self._trades_today += 1
+An entry stop is fixed from cost basis and either the configured percentage or previously
+known ATR. ATR strategies opt into their actual ATR stop automatically; a missing ATR value
+uses the percentage fallback. Partial exits retain the stop; additional entries reset its
+reference to the updated average cost. This is an entry stop, not a trailing stop.
 
-    elif signal == SIGNAL_SELL and self.position > 0 and can_sell:
-        self._execute_sell(timestamp, price, coin, result, df.iloc[i])
-        self._trades_today += 1
-```
+Ordinary strategies retain the event-based `signal` interface. Grid and Martingale also expose
+`generate_order(bar, previous_bar, portfolio, bar_index)` and receive actual cash, filled
+quantity, average purchase cost, entry count, and last entry quantity. Their `generate_signals`
+output is an indicative preview; orders are sized from the filled portfolio:
 
-**Buy execution** (`src/backtest.py:496-538`):
-```python
-executed_price = price * (1 + self.slippage)          # Slippage increases buy price
-position_value = self.cash * self.position_size         # 95% of cash
-commission = position_value * self.commission_rate      # 0.1% commission
-quantity = (position_value - commission) / executed_price
-self.cash -= position_value
-self.position = quantity
-```
+- Grid buys/sells `amount_per_grid` coin units per crossed level, supports partial exits,
+  caps inventory at `grid_num * amount_per_grid`, and requests full liquidation outside its range.
+  CLI-created grids use the first 100 bars only for calibration and cannot trade during that
+  warmup. With fewer than 100 bars, the entire sample is calibration and no trades occur.
+- Martingale uses `base_amount` coin units initially, multiplies the last actual entry quantity
+  on additions, and uses actual average cost for take profit. Filled entries determine steps;
+  exceeding the step limit requests a protective exit. Engine stops and cooldowns still apply.
 
-**Sell execution** (`src/backtest.py:540-593`):
-```python
-executed_price = price * (1 - self.slippage)           # Slippage decreases sell price
-sell_value = self.position * executed_price
-commission = sell_value * self.commission_rate
-net_value = sell_value - commission
-self.cash += net_value
-self.position = 0.0
-```
+Cash and the engine exposure cap limit additions. The daily trade limit blocks new entries,
+including additions; risk exits and normal exits are always allowed. A minimum holding period
+is measured from the first filled entry of the current position.
+
+### Accounting and Execution Identity
+
+Every fill records commission and slippage cost explicitly. Buy `value` is the cash spent,
+including commission; sell `value` is net cash received. Additional buys add to cost basis,
+and partial sells allocate cost basis in proportion to the sold quantity.
+
+Win rate, average win/loss, profit factor, and holding duration use completed flat-to-flat
+positions rather than pairing each sale with the last purchase. Daily returns include the
+first day's change from initial capital. Market exposure counts bars containing inventory
+or an entry, including entry-bar stops; it is a bar-based measure, not exact elapsed time.
+
+Logs include `execution_model` and `execution_mode`. Persistent optimization metadata includes
+the execution model version, so old studies cannot silently resume with new fills. Start a new
+study name/database when changing models; do not mix the old trial values with new evaluations.
 
 ### Risk Management
 
@@ -1001,7 +1008,7 @@ The backtest engine includes five risk management controls, all configurable via
 | Control | Parameter | Default | Description |
 |---------|-----------|---------|-------------|
 | Min holding period | `min_holding_bars` | 5 | Minimum bars to hold before selling |
-| Max trades per day | `max_trades_per_day` | 6 | Hard cap on daily trade count |
+| Max trades per day | `max_trades_per_day` | 6 | Block new entries after this many daily actions; exits remain allowed |
 | Per-trade stop-loss | `stop_loss_pct` | 0.05 (5%) | Force-sell if unrealized loss exceeds threshold |
 | Consecutive-loss cooldown | `loss_cooldown_enabled`, `max_consecutive_losses`, `consecutive_loss_cooldown` | enabled; 3 losses; 24 bars | Pause new entries after consecutive losing exits |
 | Drawdown circuit breaker | `drawdown_breaker_enabled`, `max_drawdown_pct` | enabled; 0.20 (20%) | Force-liquidate and halt trading if total drawdown exceeds threshold |
@@ -1063,30 +1070,77 @@ After a backtest, `result.metrics` contains:
 | Volatility | `volatility_pct` | Annualized standard deviation of daily returns |
 | Sharpe Ratio | `sharpe_ratio` | `(annual_return - risk_free_rate) / volatility` |
 | Max Drawdown | `max_drawdown_pct` | Largest peak-to-trough decline |
-| Win Rate | `win_rate_pct` | Percentage of sell trades that are profitable |
+| Win Rate | `win_rate_pct` | Percentage of complete positions with positive net P&L |
 | Total Trades | `total_trades` | Total number of buy/sell actions |
 | Trades/Month | `trades_per_month` | Average trades per calendar month |
 | Total Cost | `total_cost` | Sum of all commissions and slippage |
 | Cost Drag | `cost_drag_pct` | Total cost as percentage of initial capital |
 
-**Code reference** (`src/backtest.py:159-241`):
+Additional diagnostics include `total_round_trips`, `average_win_pct`, `average_loss_pct`,
+`profit_factor` (null when there is no realized loss), `median_holding_hours`,
+`market_exposure_pct`, `blocked_entry_orders`, and `deferred_exit_bars`.
+`buy_hold_return_pct` is the underlying first-to-last close price return before costs;
+it is labeled as such and is not a simulated portfolio benchmark.
+
 ```python
-# Win rate calculation
-for trade in self.trades:
-    if trade.action == "buy":
-        last_buy_price = trade.price
-    elif trade.action == "sell":
-        total_sells += 1
-        if last_buy_price is not None and trade.price > last_buy_price:
-            profitable_sells += 1
-
-# Sharpe ratio
-sharpe_ratio = (annual_return / 100 - RISK_FREE_RATE) / (volatility / 100)
-
-# Cost analysis (added after calculate_metrics)
-total_cost = sum(trade.value * self.commission_rate + trade.value * self.slippage
-                 for trade in result.trades)
+total_cost = sum(t.commission + t.slippage_cost for t in result.trades)
 ```
+
+The mean-reversion trend filter suppresses entries only; it never suppresses exits. RSI and
+VWAP enable this filter by default. VWAP uses true range, including previous-close gaps,
+for its ATR deviation band. Multi-factor volatility thresholds use the expanding historical
+70th percentile shifted one bar; future samples do not change historical scores.
+
+---
+
+## Optimizing Non-Momentum Strategies
+
+Run independent searches for all twelve non-Momentum strategies using cached historical data:
+
+```bash
+python scripts/optimize_strategies.py \
+  --data data/historical/btc_1h_730d.csv --coin btc --interval 1h --trials 40
+```
+
+The first 80% of data is split into three chronological development partitions. Each strategy
+runs a seeded TPE search with the default baseline as its first trial. The objective rewards
+median annual net return and penalizes return instability, drawdown above 25%, and partitions
+with fewer than two completed positions. Partitions start with fresh cash; indicator warmup
+occurs inside each partition. Search windows are expressed in bars and capped by partition size.
+This is a development-fold search plus a final holdout, not an expanding walk-forward simulation.
+
+Exactly one training-selected candidate is evaluated on the final 20%. The holdout cannot rank
+or retry candidates. Exported runtime profiles require positive holdout return, improvement
+against default holdout return, holdout drawdown no larger than 30%, at least two holdout
+positions, positive median development annual return, and at least two positions per development
+partition. Rejected parameters remain visible in the evidence report but are not activated.
+
+Grid searches include calibration length, margin, level count and total inventory fraction.
+Martingale searches include initial allocation fraction, multiplier, steps, profit target and
+loss threshold. These fractions are converted into coin quantities from causally available
+prices. Their account returns must be considered together with exposure and drawdown.
+
+Stochastic `smooth` now computes a rolling mean of raw K and its oversold/overbought thresholds
+are configurable. Multi-factor buy and absolute sell score thresholds are configurable. VWAP
+exposes `deviation_multiplier` and `min_deviation` for its dynamic ATR band.
+
+The output directory contains `report.html`, complete per-trial `results.json`, and an accepted-only
+`validated_profiles.json`. Full-sample results are descriptive and cannot affect adoption.
+Data already inspected during earlier analysis is retrospective validation, even when this
+search itself never reads the holdout until selection. Obtain new data for prospective confirmation.
+
+Profiles are opt-in and require identical coin, interval, initial capital, execution model,
+commission, slippage, position size and risk controls. Momentum keeps its separate profile.
+
+```bash
+python run_backtest.py --coin btc --compare --interval 1h --days 730 \
+  --disable-loss-cooldown --disable-drawdown-breaker \
+  --strategy-profiles results/strategy_optimization_btc_1h_20261007/validated_profiles.json
+```
+
+Use a new output directory for a new search. Checkpoints are written after each strategy;
+this CLI does not resume trial-level studies. Larger searches should still use a frozen
+validation protocol rather than repeated tuning to the same holdout.
 
 ---
 
@@ -1095,7 +1149,7 @@ total_cost = sum(trade.value * self.commission_rate + trade.value * self.slippag
 | Market Condition | Recommended Strategies | Avoid |
 |-----------------|----------------------|-------|
 | **Strong uptrend** | ma_cross, macd, momentum, atr_stop | mean_reversion, stochastic |
-| **Strong downtrend** | (short-side: macd, breakout) | mean_reversion, martingale |
+| **Strong downtrend** | Cash; these engines do not open short positions | mean_reversion, martingale |
 | **Sideways / range-bound** | rsi, bollinger, grid, vwap | momentum, breakout |
 | **Volatile / choppy** | atr_stop (low multiplier) | martingale, grid |
 | **Low volatility** | bollinger (tight bands), ma_cross | breakout, momentum |

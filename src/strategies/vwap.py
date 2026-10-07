@@ -15,11 +15,13 @@ Usage example:
 
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import convert_to_event_signals, forward_fill_position
+from strategies._helpers import convert_to_event_signals, forward_fill_position, apply_trend_filter
 from strategies.constants import (
     VWAP_ATR_WINDOW,
     VWAP_DYNAMIC_MULTIPLIER,
     VWAP_MIN_DEVIATION,
+    TREND_FILTER_WINDOW,
+    TREND_FILTER_TOLERANCE,
 )
 
 
@@ -43,6 +45,11 @@ class VWAPStrategy(TradingStrategy):
                            threshold (default True)
         atr_window: ATR rolling window for dynamic deviation calculation
                     (default VWAP_ATR_WINDOW = 20)
+        deviation_multiplier: ATR multiple for the dynamic deviation band (default 1.5).
+        min_deviation: Minimum dynamic deviation as a fraction (default 0.005).
+        trend_filter_enabled: Suppress entries in strong trends (default True).
+        trend_filter_window: Trend moving-average window.
+        trend_filter_tolerance: Maximum deviation allowed for new entries.
 
     Generated indicator columns:
         vwap: Volume-weighted average price
@@ -57,12 +64,22 @@ class VWAPStrategy(TradingStrategy):
         deviation: float = 0.01,
         dynamic_deviation: bool = True,
         atr_window: int = VWAP_ATR_WINDOW,
+        deviation_multiplier: float = VWAP_DYNAMIC_MULTIPLIER,
+        min_deviation: float = VWAP_MIN_DEVIATION,
+        trend_filter_enabled: bool = True,
+        trend_filter_window: int = TREND_FILTER_WINDOW,
+        trend_filter_tolerance: float = TREND_FILTER_TOLERANCE,
     ):
         super().__init__("VWAP_Strategy")
         self.window = window
         self.deviation = deviation
         self.dynamic_deviation = dynamic_deviation
         self.atr_window = atr_window
+        self.deviation_multiplier = deviation_multiplier
+        self.min_deviation = min_deviation
+        self.trend_filter_enabled = trend_filter_enabled
+        self.trend_filter_window = trend_filter_window
+        self.trend_filter_tolerance = trend_filter_tolerance
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -89,13 +106,22 @@ class VWAPStrategy(TradingStrategy):
         df["vwap_dev"] = (df["close"] - df["vwap"]) / df["vwap"].replace(0, float("nan"))
 
         if self.dynamic_deviation:
-            # Calculate ATR as mean of (high - low) over the rolling window
-            df["atr"] = (df["high"] - df["low"]).rolling(window=self.atr_window).mean()
+            # Include gaps from the previous close in true range.
+            previous_close = df["close"].shift(1)
+            true_range = pd.concat(
+                [
+                    df["high"] - df["low"],
+                    (df["high"] - previous_close).abs(),
+                    (df["low"] - previous_close).abs(),
+                ],
+                axis=1,
+            ).max(axis=1)
+            df["atr"] = true_range.rolling(window=self.atr_window).mean()
 
             # Derive dynamic deviation: normalized ATR scaled by multiplier, floored
             df["dynamic_dev"] = (
-                df["atr"] / df["close"].replace(0, float("nan")) * VWAP_DYNAMIC_MULTIPLIER
-            ).clip(lower=VWAP_MIN_DEVIATION)
+                df["atr"] / df["close"].replace(0, float("nan")) * self.deviation_multiplier
+            ).clip(lower=self.min_deviation)
 
         return df
 
@@ -133,6 +159,9 @@ class VWAPStrategy(TradingStrategy):
             df.loc[df["vwap_dev"] > self.deviation, "signal"] = -1
 
         # Convert state-based signals to event-based to prevent over-trading
+        df = apply_trend_filter(
+            df, self.trend_filter_enabled, self.trend_filter_window, self.trend_filter_tolerance
+        )
         df = convert_to_event_signals(df)
 
         df = forward_fill_position(df)

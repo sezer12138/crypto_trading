@@ -645,6 +645,7 @@ def test_build_metadata_records_the_full_immutable_run_identity(tmp_path: Path) 
 
     assert metadata == {
         "schema": 1,
+        "execution_model": "next_open_intrabar_v2",
         "data": {
             "path": str(data_path.resolve()),
             "sha256": "8c16152e4bd556aa7ba69aead7982b82cc8f295ef97ea18da2ced47a86975d0b",

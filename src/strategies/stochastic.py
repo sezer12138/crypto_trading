@@ -38,6 +38,8 @@ class StochasticStrategy(TradingStrategy):
         k_period: K line calculation period (default 14)
         d_period: D line smoothing period (default 3)
         smooth: K line pre-smoothing period (default 3)
+        oversold: K threshold for entry confirmation (default 20).
+        overbought: K threshold for exit confirmation (default 80).
         trend_filter_enabled: Enable trend filter to suppress signals in strong trends (default True)
         trend_filter_window: Window for trend MA calculation (default 50)
         trend_filter_tolerance: Max deviation from MA for ranging market (default 0.03)
@@ -52,6 +54,8 @@ class StochasticStrategy(TradingStrategy):
         k_period: int = 14,
         d_period: int = 3,
         smooth: int = 3,
+        oversold: float = STOCHASTIC_OVERSOLD,
+        overbought: float = STOCHASTIC_OVERBOUGHT,
         trend_filter_enabled: bool = True,
         trend_filter_window: int = TREND_FILTER_WINDOW,
         trend_filter_tolerance: float = TREND_FILTER_TOLERANCE,
@@ -60,6 +64,8 @@ class StochasticStrategy(TradingStrategy):
         self.k_period = k_period
         self.d_period = d_period
         self.smooth = smooth
+        self.oversold = oversold
+        self.overbought = overbought
         self.trend_filter_enabled = trend_filter_enabled
         self.trend_filter_window = trend_filter_window
         self.trend_filter_tolerance = trend_filter_tolerance
@@ -77,7 +83,10 @@ class StochasticStrategy(TradingStrategy):
         df = df.copy()
         lowest_low = df["low"].rolling(window=self.k_period).min()
         highest_high = df["high"].rolling(window=self.k_period).max()
-        df["k"] = 100 * (df["close"] - lowest_low) / (highest_high - lowest_low)
+        raw_k = (
+            100 * (df["close"] - lowest_low) / (highest_high - lowest_low).replace(0, float("nan"))
+        )
+        df["k"] = raw_k.rolling(window=self.smooth).mean()
         df["d"] = df["k"].rolling(window=self.d_period).mean()
         return df
 
@@ -101,7 +110,7 @@ class StochasticStrategy(TradingStrategy):
         df.loc[
             (df["k"] > df["d"])
             & (df["k"].shift(1) <= df["d"].shift(1))
-            & (df["k"] < STOCHASTIC_OVERSOLD),
+            & (df["k"] < self.oversold),
             "signal",
         ] = 1
 
@@ -109,7 +118,7 @@ class StochasticStrategy(TradingStrategy):
         df.loc[
             (df["k"] < df["d"])
             & (df["k"].shift(1) >= df["d"].shift(1))
-            & (df["k"] > STOCHASTIC_OVERBOUGHT),
+            & (df["k"] > self.overbought),
             "signal",
         ] = -1
 

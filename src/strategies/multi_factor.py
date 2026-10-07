@@ -50,6 +50,8 @@ class MultiFactorStrategy(TradingStrategy):
         ma_long: Long-term moving average window (default 20)
         rsi_period: RSI calculation period (default 14)
         volume_threshold: Volume ratio threshold (default 1.5)
+        buy_threshold: Positive score threshold for entries (default 0.5).
+        sell_threshold: Absolute negative score threshold for exits (default 0.5).
 
     Generated indicator columns:
         ma_short, ma_long, ma_trend: Moving averages and trend direction
@@ -65,12 +67,16 @@ class MultiFactorStrategy(TradingStrategy):
         ma_long: int = DEFAULT_MA_LONG,
         rsi_period: int = DEFAULT_RSI_PERIOD,
         volume_threshold: float = DEFAULT_VOLUME_THRESHOLD,
+        buy_threshold: float = SCORE_BUY_THRESHOLD,
+        sell_threshold: float = -SCORE_SELL_THRESHOLD,
     ):
         super().__init__("Multi_Factor")
         self.ma_short = ma_short
         self.ma_long = ma_long
         self.rsi_period = rsi_period
         self.volume_threshold = volume_threshold
+        self.buy_threshold = buy_threshold
+        self.sell_threshold = sell_threshold
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -135,7 +141,12 @@ class MultiFactorStrategy(TradingStrategy):
         df.loc[df["volume_ratio"] < VOLUME_LOW_RATIO, "score"] -= WEIGHT_VOLUME
 
         # Volatility filter (weight 20%)
-        vol_threshold = df["volatility"].quantile(VOLATILITY_QUANTILE)
+        vol_threshold = (
+            df["volatility"]
+            .expanding(min_periods=DEFAULT_VOLATILITY_WINDOW)
+            .quantile(VOLATILITY_QUANTILE)
+            .shift(1)
+        )
         df.loc[df["volatility"] > vol_threshold, "score"] -= WEIGHT_VOLATILITY
 
         return df
@@ -161,8 +172,8 @@ class MultiFactorStrategy(TradingStrategy):
         df = self._calculate_score(df)
 
         df["signal"] = 0
-        df.loc[df["score"] > SCORE_BUY_THRESHOLD, "signal"] = 1
-        df.loc[df["score"] < SCORE_SELL_THRESHOLD, "signal"] = -1
+        df.loc[df["score"] > self.buy_threshold, "signal"] = 1
+        df.loc[df["score"] < -self.sell_threshold, "signal"] = -1
 
         df = convert_to_event_signals(df)
         df = forward_fill_position(df)

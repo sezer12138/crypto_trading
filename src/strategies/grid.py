@@ -12,7 +12,8 @@ Usage example:
 
 import numpy as np
 import pandas as pd
-from strategies._base import TradingStrategy
+from strategies._base import TradingStrategy, PortfolioState, TradeOrder
+from typing import Optional
 
 
 class GridStrategy(TradingStrategy):
@@ -41,12 +42,18 @@ class GridStrategy(TradingStrategy):
         upper_price: float,
         grid_num: int = 10,
         amount_per_grid: float = 0.01,
+        warmup_bars: int = 0,
     ):
         super().__init__("Grid_Strategy")
         self.lower_price = lower_price
         self.upper_price = upper_price
         self.grid_num = grid_num
+        if not 0 < lower_price < upper_price or grid_num < 2 or amount_per_grid <= 0:
+            raise ValueError(
+                "Grid requires ordered positive bounds, at least two levels, and positive size"
+            )
         self.amount_per_grid = amount_per_grid
+        self.warmup_bars = warmup_bars
 
         # Calculate grid prices
         self.grid_prices = np.linspace(lower_price, upper_price, grid_num)
@@ -76,7 +83,7 @@ class GridStrategy(TradingStrategy):
         signals = [0] * len(df)
         positions = [0.0] * len(df)
 
-        for i in range(1, len(df)):
+        for i in range(max(1, self.warmup_bars), len(df)):
             current_price = prices[i]
             last_price = prices[i - 1]
 
@@ -95,3 +102,26 @@ class GridStrategy(TradingStrategy):
         df["position"] = positions
 
         return df
+
+    def generate_order(
+        self,
+        bar: pd.Series,
+        previous_bar: Optional[pd.Series],
+        portfolio: PortfolioState,
+        bar_index: int,
+    ) -> Optional[TradeOrder]:
+        """Size each crossed level against actual inventory, with bounded grid exposure."""
+        if bar_index < self.warmup_bars or previous_bar is None:
+            return None
+        price, previous = float(bar["close"]), float(previous_bar["close"])
+        if not self.lower_price <= price <= self.upper_price:
+            return TradeOrder(-1, force=True) if portfolio.quantity > 0 else None
+        crossed_down = sum(previous > level >= price for level in self.grid_prices)
+        crossed_up = sum(previous < level <= price for level in self.grid_prices)
+        if crossed_down:
+            capacity = self.grid_num * self.amount_per_grid - portfolio.quantity
+            quantity = min(crossed_down * self.amount_per_grid, capacity)
+            return TradeOrder(1, quantity) if quantity > 0 else None
+        if crossed_up and portfolio.quantity > 0:
+            return TradeOrder(-1, min(crossed_up * self.amount_per_grid, portfolio.quantity))
+        return None

@@ -14,6 +14,7 @@ import pandas as pd
 from optuna.study import Study
 from optuna.trial import Trial, TrialState
 
+from backtest import BACKTEST_MODEL_VERSION
 from optimization.data import fingerprint_file
 from optimization.momentum_evaluator import BacktestRunConfig
 from optimization.momentum_objective import (
@@ -69,6 +70,7 @@ def build_metadata(
 
     metadata: dict[str, JSONSerializable] = {
         "schema": OPTIMIZER_SCHEMA_VERSION,
+        "execution_model": BACKTEST_MODEL_VERSION,
         "data": {
             "path": str(data_path.resolve()),
             "sha256": fingerprint_file(data_path),

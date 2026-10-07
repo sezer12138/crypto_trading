@@ -5,6 +5,9 @@ All trading strategies must inherit TradingStrategy and implement the generate_s
 Signal convention: 1=Buy, -1=Sell, 0=Hold
 """
 
+from dataclasses import dataclass
+from typing import Optional
+
 import pandas as pd
 from typing import Dict, List
 
@@ -72,3 +75,28 @@ class TradingStrategy:
             DataFrame with indicator columns added
         """
         return df
+
+
+@dataclass(frozen=True)
+class PortfolioState:
+    """Actual filled inventory exposed to an execution-aware strategy at bar close."""
+
+    cash: float
+    quantity: float
+    cost_basis: float
+    entry_count: int
+    last_entry_quantity: float = 0.0
+
+    @property
+    def average_cost(self) -> float:
+        """Return average purchase cost, including entry fees and slippage."""
+        return self.cost_basis / self.quantity if self.quantity > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class TradeOrder:
+    """Market order for the next open; quantity=None closes the whole position."""
+
+    signal: int
+    quantity: Optional[float] = None
+    force: bool = False

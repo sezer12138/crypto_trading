@@ -14,7 +14,7 @@ Usage example:
 import numpy as np
 import pandas as pd
 from strategies._base import TradingStrategy
-from strategies._helpers import forward_fill_position
+from strategies._helpers import forward_fill_position, convert_to_event_signals
 
 
 class ATRStopLossStrategy(TradingStrategy):
@@ -40,6 +40,7 @@ class ATRStopLossStrategy(TradingStrategy):
         self.atr_period = atr_period
         self.multiplier = multiplier
         self.trend_ma = trend_ma
+        self.use_atr_stop_loss = True
 
     def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
         """
@@ -96,5 +97,6 @@ class ATRStopLossStrategy(TradingStrategy):
             "signal",
         ] = -1
 
+        df = convert_to_event_signals(df)
         df = forward_fill_position(df)
         return df

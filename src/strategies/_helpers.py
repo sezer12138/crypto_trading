@@ -139,17 +139,17 @@ def apply_trend_filter(
     tolerance: float,
 ) -> pd.DataFrame:
     """
-    Conditionally compute the trend filter and zero out signals in trending periods.
+    Conditionally compute the trend filter and suppress new entries in trending periods.
 
-    No-op when ``enabled`` is False. Otherwise calls ``add_trend_filter`` and zeros the
-    ``signal`` column wherever ``trend_filter`` is False (strong trend). Should be
+    No-op when ``enabled`` is False. Otherwise calls ``add_trend_filter`` and suppresses buy signals wherever ``trend_filter`` is False (strong trend).
+    Sell signals remain actionable so existing positions can always exit. Should be
     applied before ``forward_fill_position`` so the derived position column reflects
     the filtered signals.
     """
     if not enabled:
         return df
     df = add_trend_filter(df, window, tolerance)
-    df.loc[~df["trend_filter"], "signal"] = 0
+    df.loc[~df["trend_filter"] & (df["signal"] == 1), "signal"] = 0
     return df
 
 

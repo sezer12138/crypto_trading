@@ -103,16 +103,16 @@ class MeanReversionStrategy(TradingStrategy):
         df["signal"] = 0
         df.loc[df["zscore"] < -self.entry_z, "signal"] = 1
         df.loc[df["zscore"] > self.entry_z, "signal"] = -1
-        # exit_z overrides entry signals when reverting to mean
-        df.loc[abs(df["zscore"]) < self.exit_z, "signal"] = 0
+        # Emit an exit event when price returns to the mean; zero means hold.
+        df.loc[abs(df["zscore"]) < self.exit_z, "signal"] = -1
 
-        df = convert_to_event_signals(df)
         df = apply_trend_filter(
             df,
             self.trend_filter_enabled,
             self.trend_filter_window,
             self.trend_filter_tolerance,
         )
+        df = convert_to_event_signals(df)
         df = forward_fill_position(df)
 
         return df

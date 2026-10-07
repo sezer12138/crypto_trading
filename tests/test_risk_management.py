@@ -176,8 +176,8 @@ class TestConsecutiveLossCooldown:
 
     @staticmethod
     def _losing_round_trips() -> pd.DataFrame:
-        prices = [100.0, 90.0] * 4
-        signals = [SIGNAL_BUY, SIGNAL_SELL] * 4
+        prices = [100.0] + [100.0, 90.0] * 4
+        signals = [SIGNAL_BUY, SIGNAL_SELL] * 4 + [0]
         return _make_df(prices, signals=signals)
 
     def test_enabled_cooldown_blocks_buy_and_logs_warning(self, caplog) -> None:
@@ -284,7 +284,7 @@ class TestDrawdownCircuitBreaker:
 
     def test_disabled_circuit_breaker_does_not_force_liquidation(self):
         prices = [100.0, 120.0, 90.0, 95.0, 100.0]
-        signals = [SIGNAL_BUY, 0, 0, 0, SIGNAL_SELL]
+        signals = [SIGNAL_BUY, 0, 0, SIGNAL_SELL, 0]
         df = _make_df(prices, freq="D", signals=signals)
         engine = BacktestEngine(
             initial_capital=10000,
@@ -317,7 +317,7 @@ class TestDrawdownCircuitBreaker:
 
     def test_disabled_breaker_configuration_survives_reset_and_reuse(self):
         prices = [100.0, 120.0, 90.0, 95.0, 100.0]
-        signals = [SIGNAL_BUY, 0, 0, 0, SIGNAL_SELL]
+        signals = [SIGNAL_BUY, 0, 0, SIGNAL_SELL, 0]
         df = _make_df(prices, freq="D", signals=signals)
         engine = BacktestEngine(
             initial_capital=10000,
@@ -439,7 +439,8 @@ class TestPerformanceAccounting:
         df = _make_df([100.0] * 72, signals=[0] * 72)
         result = BacktestEngine().run_backtest(df, IdentityStrategy(), coin="TEST")
 
-        assert len(result.daily_returns) == 2
+        assert len(result.daily_returns) == 3
+        assert result.daily_returns.iloc[0] == 0
 
 
 # ---------------------------------------------------------------------------

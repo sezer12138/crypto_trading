@@ -33,7 +33,7 @@ class RSIStrategy(TradingStrategy):
         period: RSI calculation period (default 14)
         oversold: Oversold threshold (default 30)
         overbought: Overbought threshold (default 70)
-        trend_filter_enabled: Enable trend filter to suppress signals in strong trends (default False)
+        trend_filter_enabled: Enable trend filter to suppress signals in strong trends (default True)
         trend_filter_window: Window for trend MA calculation (default 50)
         trend_filter_tolerance: Max deviation from MA for ranging market (default 0.03)
 
@@ -46,7 +46,7 @@ class RSIStrategy(TradingStrategy):
         period: int = DEFAULT_RSI_PERIOD,
         oversold: int = DEFAULT_RSI_OVERSOLD,
         overbought: int = DEFAULT_RSI_OVERBOUGHT,
-        trend_filter_enabled: bool = False,
+        trend_filter_enabled: bool = True,
         trend_filter_window: int = TREND_FILTER_WINDOW,
         trend_filter_tolerance: float = TREND_FILTER_TOLERANCE,
     ):
