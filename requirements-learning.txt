@@ -1,0 +1,3 @@
+# Optional dependencies for scripts/train_tcn.py; install base requirements first.
+torch>=2.2,<3
+tensorboard>=2.16,<3

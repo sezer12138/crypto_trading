@@ -646,3 +646,17 @@ black        - 代码格式化
 ## 📄 License
 
 MIT License - 仅供学习和研究使用
+
+## Optional Deep-Learning Research
+
+A BTC/cash causal TCN with multi-horizon return quantiles, dynamic allocation, transaction-cost-aware training, and drawdown controls is available as an optional research pipeline. It uses chronological train/validation/holdout partitions and exports frozen checkpoints, execution replay evidence, baselines, and doubled-cost results. Existing strategy defaults remain unchanged.
+
+```bash
+pip install -r requirements-learning.txt
+python scripts/train_tcn.py --data data/historical/btc_1h_730d.csv \
+  --output results/tcn_btc_v1 --seeds 7 19 42
+```
+
+See [TCN research documentation](docs/TCN_TRADING.md) for assumptions, reproducible commands, checkpoint inference, and the limits of retrospective validation. Use a new output directory for each experiment.
+
+New runs also write TensorBoard loss, validation, learning-rate and gradient diagnostics. Start `python -m tensorboard.main --logdir results --host 127.0.0.1 --port 6006` and open http://127.0.0.1:6006. See [TensorBoard monitoring](docs/TENSORBOARD.md); use `--no-tensorboard` to disable it.
