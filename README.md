@@ -660,3 +660,5 @@ python scripts/train_tcn.py --data data/historical/btc_1h_730d.csv \
 See [TCN research documentation](docs/TCN_TRADING.md) for assumptions, reproducible commands, checkpoint inference, and the limits of retrospective validation. Use a new output directory for each experiment.
 
 New runs also write TensorBoard loss, validation, learning-rate and gradient diagnostics. Start `python -m tensorboard.main --logdir results --host 127.0.0.1 --port 6006` and open http://127.0.0.1:6006. See [TensorBoard monitoring](docs/TENSORBOARD.md); use `--no-tensorboard` to disable it.
+
+For longer BTC history and controlled capacity/budget comparisons, see [the capacity and history study](docs/TCN_CAPACITY_HISTORY_STUDY.md). It adds verified Binance archives, training-only gap handling, shared-date evaluation, validation scheduling, and an immutable multi-seed study runner.

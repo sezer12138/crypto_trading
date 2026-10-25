@@ -1045,3 +1045,7 @@ The exact architecture, coefficient choices, data split and combined objective a
 ## 17. TensorBoard monitoring
 
 Training now writes separate event runs under `<output>/tensorboard/seed_<seed>` by default. See [the TensorBoard guide](TENSORBOARD.md) for launch commands, scalar tags, gradient/parameter diagnostics and the distinction between purged validation losses and full canonical validation returns. This monitoring extension does not change the model, training objective or checkpoint ranking.
+
+## 18. Extended training and history study
+
+The original 28-field configuration table describes the v1 recipe. Subsequent backward-compatible fields are `pretrain_stride=12`, `early_stopping_patience=0`, `lr_patience=0`, `lr_factor=0.5`, `min_lr=1e-6`, `restore_best_pretrain=False`, `min_pretrain_epochs=0`, `min_policy_epochs=0`, `cpu_threads=4`, and `pretrain_device="cpu"`. Nonzero patience enables the corresponding control. Explicit split indices and opt-in training-only gaps are Python data/experiment API arguments rather than inference-model architecture fields. See [the capacity/history study](TCN_CAPACITY_HISTORY_STUDY.md) for exact shared dates, dataset audit, MPS/CPU execution, longer training budgets, best-pretrain restoration, immutable resume checks and expanded diagnostic interpretation.

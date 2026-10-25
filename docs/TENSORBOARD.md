@@ -82,7 +82,7 @@ From Python, pass `tensorboard=False` to `run_experiment`. The logging option is
 | `experiment/parameter_count` | 0 | Number of trainable model parameters |
 | `selection/selected_epoch` | Final policy epoch | Epoch chosen by the original validation return/risk score |
 
-Pretraining and policy update counters are separate. `grad_norm > 1` is possible because the recorded norm is measured before clipping. There is no LR scheduler in this version: constant LR lines within each stage are expected, and policy training starts with a new optimizer.
+Pretraining and policy update counters are separate. `grad_norm > 1` is possible because the recorded norm is measured before clipping. With the original defaults, the LR scheduler is disabled: constant LR lines within each stage are expected, and policy training starts with a new optimizer.
 
 `model/quantile_head.*` and `model/policy_head.*` histograms are recorded at policy candidate epochs. `experiment/config` and `experiment/model` text entries show the full configuration and architecture. The exact dataset fingerprint and split boundaries remain in `manifest.json`.
 
@@ -121,3 +121,7 @@ Source: [monitoring helpers](../src/learning/monitoring.py), [training integrati
 ### Local validation environment note
 
 The existing project `.venv` inherits system packages, including an incompatible TensorFlow 2.10/protobuf installation. For the October 10 verification, TensorBoard 2.21 was installed inside `.venv`, and its `tensorboard.compat.notf` marker was added locally to select TensorBoard's built-in TensorFlow-free compatibility layer. This is an environment-only adjustment, not repository code or a required installation step. An inherited What-If plugin still reports a TensorFlow import error at server startup and is skipped; scalar/text/histogram event writing and the live scalar HTTP endpoint were verified. Prefer the clean virtual environment command above for a fresh installation.
+
+## Extended-study diagnostics
+
+The [capacity/history study](TCN_CAPACITY_HISTORY_STUDY.md) adds opt-in validation LR decay and early stopping. New tags include `pretrain/encoder_grad_norm`, `pretrain/quantile_head_grad_norm`, `pretrain/policy_head_grad_norm` and equivalent `policy/*_grad_norm` tags, measured before clipping. Policy epoch summaries report zero-gradient and zero-update fractions. A high zero-gradient fraction means the policy head often receives no trading gradient along the selected execution branches; it is distinct from a small global encoder gradient. Read the exact tags from the Scalars sidebar. Histories also record LR changes, completed update counts and stopping reasons.

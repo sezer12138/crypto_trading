@@ -86,3 +86,7 @@ The 17,512-bar cached BTC dataset spans 2024-10-07 through 2026-10-07. The final
 All learned policies failed the holdout positive-net-return gate. Low drawdown alone is not evidence of a useful model. The primary model underperformed momentum in both return and drawdown. Keep these checkpoints for research; they were not activated.
 
 The initial run aborted on an execution replay mismatch. Regression fixes for zero-target rounding dust and daily sell-count accounting preceded the final run; no hyperparameters or seeds were changed based on holdout performance. The failed run and original log remain under `results/tcn_btc_v1_execution_mismatch/`. The corrected full-path replay errors were at most approximately 1e-7 of initial capital. Tests: 271 passed, including 26 learning tests; 43 existing repository warnings.
+
+## Extended capacity and history experiments
+
+See [the controlled BTC study](TCN_CAPACITY_HISTORY_STUDY.md) for hidden-32/128 comparisons, longer 2018-onward Binance history, opt-in early stopping/LR decay/MPS pretraining, fixed-date evaluation and an explicitly frozen recent tail. Existing training defaults remain available; old checkpoints receive defaults for the new optional configuration fields.

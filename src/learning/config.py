@@ -36,6 +36,16 @@ class LearningConfig:
     turnover_penalty: float = 0.00002
     auxiliary_weight: float = 0.05
     label_scale: float = 100.0
+    pretrain_stride: int = 12
+    early_stopping_patience: int = 0
+    lr_patience: int = 0
+    lr_factor: float = 0.5
+    min_lr: float = 1e-6
+    restore_best_pretrain: bool = False
+    min_pretrain_epochs: int = 0
+    min_policy_epochs: int = 0
+    cpu_threads: int = 4
+    pretrain_device: str = "cpu"
 
     def __post_init__(self) -> None:
         """Reject settings that silently change the causal/executable contract."""
@@ -69,3 +79,30 @@ class LearningConfig:
             raise ValueError("Epoch and holding counts cannot be negative")
         if self.max_daily_entries < 1 or self.learning_rate <= 0:
             raise ValueError("Entry cap and learning rate must be positive")
+        if min(self.pretrain_stride, self.cpu_threads) < 1:
+            raise ValueError("Sampling stride and CPU thread count must be positive")
+        if (
+            min(
+                self.early_stopping_patience,
+                self.lr_patience,
+                self.min_pretrain_epochs,
+                self.min_policy_epochs,
+            )
+            < 0
+        ):
+            raise ValueError("Schedule counts cannot be negative")
+        if (
+            self.min_pretrain_epochs > self.pretrain_epochs
+            or self.min_policy_epochs > self.policy_epochs
+        ):
+            raise ValueError("Minimum epochs cannot exceed the stage budget")
+        if (
+            not 0 < self.lr_factor < 1
+            or self.min_lr <= 0
+            or (self.lr_patience and self.min_lr > self.learning_rate / 3)
+        ):
+            raise ValueError(
+                "Require 0 < LR factor < 1 and positive LR floor within both stage rates"
+            )
+        if self.pretrain_device not in ("cpu", "mps"):
+            raise ValueError("Pretraining device must be cpu or mps")

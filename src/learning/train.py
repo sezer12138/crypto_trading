@@ -16,7 +16,7 @@ from learning.config import LearningConfig
 from learning.data import PreparedData, prepare_data
 from learning.execution import make_engine, path_objective, simulate_path
 from learning.model import TCNPolicy, quantile_loss
-from learning.monitoring import create_writer, log_model, loss_components
+from learning.monitoring import create_writer, gradient_norms, log_model, loss_components
 from learning.report import research_metrics, export_trajectory, write_report
 from learning.strategy import EncodedStrategy
 from optimization.data import fingerprint_file, load_ohlcv
@@ -49,6 +49,54 @@ def selection_score(metrics: dict[str, Any], limit: float) -> tuple[bool, float,
     return feasible, metrics["net_return_pct"], -metrics["total_cost"]
 
 
+class ValidationSchedule:
+    """Apply patience to a maximizing scalar or lexicographic validation score.
+
+    Feasibility remains the leading policy selection criterion. Negate quantile
+    loss to use this same maximizing interface during pretraining.
+    """
+
+    def __init__(self, config: LearningConfig, minimum_epochs: int) -> None:
+        self.config = config
+        self.minimum_epochs = minimum_epochs
+        self.best = None
+        self.bad_epochs = 0
+        self.lr_bad_epochs = 0
+
+    def step(self, score: Any, epoch: int, optimizer: torch.optim.Optimizer) -> bool:
+        """Update after validation and return whether the stage should stop."""
+        if self.best is None or score > self.best:
+            self.best = score
+            self.bad_epochs = 0
+            self.lr_bad_epochs = 0
+        else:
+            self.bad_epochs += 1
+            self.lr_bad_epochs += 1
+            if self.config.lr_patience and self.lr_bad_epochs >= self.config.lr_patience:
+                for group in optimizer.param_groups:
+                    group["lr"] = max(self.config.min_lr, group["lr"] * self.config.lr_factor)
+                self.lr_bad_epochs = 0
+        return bool(
+            self.config.early_stopping_patience
+            and epoch >= self.minimum_epochs
+            and self.bad_epochs >= self.config.early_stopping_patience
+        )
+
+
+def training_segments(indices: np.ndarray, segment_bars: int) -> list[tuple[int, int]]:
+    """Split chronological eligible runs without traversing gap-purged rows."""
+    segments = []
+    for run in np.split(indices, np.flatnonzero(np.diff(indices) != 1) + 1):
+        if not len(run):
+            continue
+        end = int(run[-1]) + 1
+        for start in range(int(run[0]), end, segment_bars):
+            right = min(start + segment_bars, end)
+            if right - start >= 48:
+                segments.append((start, right))
+    return segments
+
+
 def adoption_status(metrics: dict[str, Any], limit: float) -> str:
     """Reject cash, losses and drawdown breaches as evidence of a useful policy."""
     return (
@@ -66,6 +114,7 @@ def encode_partition(
     """Warm the causal receptive field from already observed history."""
     context_start = max(0, start - model.config.lookback + 1)
     x = torch.from_numpy(data.features[context_start:end].T.copy())[None]
+    x = x.to(next(model.parameters()).device)
     encoded, quantiles = model.encode(x)
     offset = start - context_start
     return encoded[0, offset:], quantiles[0, offset:]
@@ -99,7 +148,11 @@ def pretrain(
     writer: Optional["SummaryWriter"] = None,
 ) -> list[dict[str, Any]]:
     """Optimize executable return quantiles on purged training windows only."""
-    indices = data.train_indices[::12]
+    if config.pretrain_device == "mps" and not torch.backends.mps.is_available():
+        raise ValueError("MPS pretraining requested but MPS is unavailable")
+    device = torch.device(config.pretrain_device)
+    model.to(device)
+    indices = data.train_indices[:: config.pretrain_stride]
     windows = np.stack([data.features[i - config.lookback + 1 : i + 1].T for i in indices])
     dataset = TensorDataset(
         torch.from_numpy(windows.copy()), torch.from_numpy(data.labels[indices])
@@ -113,15 +166,27 @@ def pretrain(
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=1e-4)
     history = []
     step = 0
+    schedule = ValidationSchedule(config, config.min_pretrain_epochs)
+    best_state = None
+    best_loss = float("inf")
+    best_epoch = None
+    needs_validation = bool(
+        writer is not None
+        or config.restore_best_pretrain
+        or config.lr_patience
+        or config.early_stopping_patience
+    )
     for epoch in range(config.pretrain_epochs):
         started = perf_counter()
         model.train()
         losses = []
         for x, y in loader:
+            x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
             _, predictions = model.encode(x)
             loss = quantile_loss(predictions[:, -1], y, config.label_scale)
             loss.backward()
+            heads = gradient_norms(model)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
             optimizer.step()
             losses.append(float(loss.detach()))
@@ -130,13 +195,39 @@ def pretrain(
                 writer.add_scalar("pretrain/train_loss_step", losses[-1], step)
                 writer.add_scalar("pretrain/lr", optimizer.param_groups[0]["lr"], step)
                 writer.add_scalar("pretrain/grad_norm", float(grad_norm), step)
-        entry = {"stage": "pretrain", "epoch": epoch + 1, "loss": float(np.mean(losses))}
-        if writer is not None:
+                for name, value in heads.items():
+                    writer.add_scalar(f"pretrain/{name}_grad_norm", value, step)
+        entry = {
+            "stage": "pretrain",
+            "epoch": epoch + 1,
+            "loss": float(np.mean(losses)),
+            "optimizer_updates": step,
+            "epoch_updates": len(losses),
+            "lr": optimizer.param_groups[0]["lr"],
+        }
+        stop = False
+        if needs_validation:
             validation = validation_losses(model, data, config, include_policy=False)
             entry["val_loss"] = validation["quantile_loss"]
+            if not np.isfinite(entry["val_loss"]):
+                raise RuntimeError("Nonfinite pretraining validation loss")
+            if entry["val_loss"] < best_loss:
+                best_loss, best_epoch = entry["val_loss"], epoch + 1
+                if config.restore_best_pretrain:
+                    best_state = copy.deepcopy(model.state_dict())
+            stop = schedule.step(-entry["val_loss"], epoch + 1, optimizer)
+        entry["next_lr"] = optimizer.param_groups[0]["lr"]
+        entry["epoch_seconds"] = perf_counter() - started
+        entry["stop_reason"] = (
+            "validation_patience"
+            if stop
+            else "epoch_budget" if epoch + 1 == config.pretrain_epochs else None
+        )
+        if writer is not None:
             writer.add_scalar("pretrain/train_loss", entry["loss"], epoch + 1)
             writer.add_scalar("pretrain/val_loss", entry["val_loss"], epoch + 1)
-            writer.add_scalar("pretrain/epoch_seconds", perf_counter() - started, epoch + 1)
+            writer.add_scalar("pretrain/epoch_seconds", entry["epoch_seconds"], epoch + 1)
+            writer.add_scalar("pretrain/optimizer_updates", step, epoch + 1)
             writer.flush()
         history.append(entry)
         (directory / f"seed_{seed}_history.json").write_text(json.dumps(history, indent=2))
@@ -144,6 +235,13 @@ def pretrain(
             f"Seed {seed} pretrain {epoch+1}/{config.pretrain_epochs}: loss={entry['loss']:.6f}",
             flush=True,
         )
+        if stop:
+            break
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        history[-1]["restored_pretrain_epoch"] = best_epoch
+        (directory / f"seed_{seed}_history.json").write_text(json.dumps(history, indent=2))
+    model.cpu()
     return history
 
 
@@ -163,7 +261,9 @@ def validation_losses(
             end = int(data.validation_indices[-1]) + 1
             encoded, predictions = encode_partition(model, data, start, end)
             auxiliary = quantile_loss(
-                predictions, torch.from_numpy(data.labels[start:end]), config.label_scale
+                predictions,
+                torch.from_numpy(data.labels[start:end]).to(predictions.device),
+                config.label_scale,
             )
             values = {"quantile_loss": float(auxiliary)}
             if include_policy:
@@ -223,19 +323,18 @@ def _train_seed(
     selected_epoch = 0
     rng = np.random.default_rng(seed)
     step = 0
+    schedule = ValidationSchedule(config, config.min_policy_epochs)
     # Epoch zero is a predefined candidate, not a holdout-driven fallback.
     for epoch in range(config.policy_epochs + 1):
         started = perf_counter()
         if epoch:
             losses = []
             components = []
-            start = int(data.train_indices[0])
-            end = int(data.train_indices[-1]) + 1
-            segments = [
-                (i, min(i + config.segment_bars, end))
-                for i in range(start, end, config.segment_bars)
-                if min(i + config.segment_bars, end) - i >= 48
-            ]
+            segments = training_segments(data.train_indices, config.segment_bars)
+            if not segments:
+                raise ValueError("No eligible policy segments contain at least 48 bars")
+            zero_gradients = 0
+            zero_updates = 0
             rng.shuffle(segments)
             for left, right in segments:
                 model.train()
@@ -258,8 +357,17 @@ def _train_seed(
                 if not torch.isfinite(loss):
                     raise RuntimeError("Nonfinite training loss")
                 loss.backward()
+                heads = gradient_norms(model)
+                before = [p.detach().clone() for p in model.policy_head.parameters()]
+                zero_gradients += int(heads["policy_head"] == 0)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
                 optimizer.step()
+                zero_updates += int(
+                    all(
+                        torch.equal(old, p.detach())
+                        for old, p in zip(before, model.policy_head.parameters())
+                    )
+                )
                 losses.append(float(loss.detach()))
                 step += 1
                 if writer is not None:
@@ -268,9 +376,26 @@ def _train_seed(
                     writer.add_scalar("policy/lr", optimizer.param_groups[0]["lr"], step)
                     writer.add_scalar("policy/grad_norm", float(grad_norm), step)
                     writer.add_scalar("policy/segment_bars", right - left, step)
-            entry = {"stage": "policy", "epoch": epoch, "loss": float(np.mean(losses))}
+                    for name, value in heads.items():
+                        writer.add_scalar(f"policy/{name}_grad_norm", value, step)
+            entry = {
+                "stage": "policy",
+                "epoch": epoch,
+                "loss": float(np.mean(losses)),
+                "optimizer_updates": step,
+                "epoch_updates": len(losses),
+                "lr": optimizer.param_groups[0]["lr"],
+                "policy_zero_gradient_fraction": zero_gradients / len(losses),
+                "policy_zero_update_fraction": zero_updates / len(losses),
+            }
             if writer is not None:
                 writer.add_scalar("policy/train_loss", entry["loss"], epoch)
+                for key in (
+                    "policy_zero_gradient_fraction",
+                    "policy_zero_update_fraction",
+                    "optimizer_updates",
+                ):
+                    writer.add_scalar(f"policy/{key}", entry[key], epoch)
                 for key in components[0]:
                     writer.add_scalar(
                         f"policy/train_{key}", float(np.mean([c[key] for c in components])), epoch
@@ -279,9 +404,10 @@ def _train_seed(
         validation, _, _ = evaluate(model, data, data.train_end, data.validation_end, config)
         metrics = research_metrics(validation)
         entry = {"stage": "validation", "epoch": epoch, "metrics": metrics}
-        if writer is not None:
+        if writer is not None or config.early_stopping_patience or config.lr_patience:
             diagnostic = validation_losses(model, data, config)
             entry["losses"] = diagnostic
+        if writer is not None:
             writer.add_scalar("policy/val_loss", diagnostic["loss"], epoch)
             writer.add_scalar("policy/val_quantile_loss", diagnostic["quantile_loss"], epoch)
             for key in ("growth_loss", "cdar_loss", "mdd_loss", "turnover_loss", "auxiliary_loss"):
@@ -303,6 +429,31 @@ def _train_seed(
         if best_score is None or score > best_score:
             best_score, selected = score, copy.deepcopy(model.state_dict())
             selected_metrics, selected_epoch = metrics, epoch
+        stop = schedule.step(score, epoch, optimizer)
+        entry["optimizer_updates"] = step
+        entry["next_lr"] = optimizer.param_groups[0]["lr"]
+        entry["epoch_seconds"] = perf_counter() - started
+        entry["stop_reason"] = (
+            "validation_patience"
+            if stop
+            else "epoch_budget" if epoch == config.policy_epochs else None
+        )
+        (directory / f"seed_{seed}_history.json").write_text(json.dumps(history, indent=2))
+        if stop:
+            break
+    training_summary = {
+        "pretrain_updates": sum(
+            row.get("epoch_updates", 0) for row in history if row["stage"] == "pretrain"
+        ),
+        "policy_updates": step,
+        "pretrain_epochs": sum(row["stage"] == "pretrain" for row in history),
+        "policy_epochs": epoch,
+        "policy_stop_reason": entry["stop_reason"],
+        "pretrain_stop_reason": next(
+            (row["stop_reason"] for row in reversed(history) if row["stage"] == "pretrain"),
+            "zero_epoch_budget",
+        ),
+    }
     model.load_state_dict(selected)
     if writer is not None:
         writer.add_scalar("selection/selected_epoch", selected_epoch, config.policy_epochs)
@@ -318,6 +469,7 @@ def _train_seed(
             "seed": seed,
             "selected_epoch": selected_epoch,
             "selection_partition": "validation",
+            "training_summary": training_summary,
         },
         directory / checkpoint,
     )
@@ -344,6 +496,7 @@ def _train_seed(
         "costs_doubled": research_metrics(stress),
         "max_replay_equity_error_fraction": error,
         "history": history,
+        "training_summary": training_summary,
     }
     (directory / f"seed_{seed}_audit.json").write_text(json.dumps(audit, indent=2, allow_nan=False))
     if error > 5e-5:
@@ -365,6 +518,7 @@ def _train_seed(
         "holdout_status": adoption_status(research_metrics(holdout), config.drawdown_limit),
         "max_replay_equity_error_fraction": error,
         "history": history,
+        "training_summary": training_summary,
     }
 
 
@@ -374,6 +528,8 @@ def run_experiment(
     config: LearningConfig,
     seeds: list[int],
     tensorboard: bool = True,
+    split_indices: tuple[int, int] | None = None,
+    allow_training_gaps: bool = False,
 ) -> dict[str, Any]:
     """Run predeclared seeds, never rank or retune using the final holdout."""
     if not seeds or len(set(seeds)) != len(seeds):
@@ -381,9 +537,14 @@ def run_experiment(
     if output.exists() and any(output.iterdir()):
         raise ValueError("Use a new empty output directory; experiments cannot be overwritten")
     frame = load_ohlcv(data_path)
-    data = prepare_data(frame, config)
+    preparation = {}
+    if split_indices is not None:
+        preparation["split_indices"] = split_indices
+    if allow_training_gaps:
+        preparation["allow_training_gaps"] = True
+    data = prepare_data(frame, config, **preparation)
     output.mkdir(parents=True, exist_ok=True)
-    torch.set_num_threads(min(torch.get_num_threads(), 4))
+    torch.set_num_threads(config.cpu_threads)
     torch.use_deterministic_algorithms(True)
     report = {
         "primary_seed": seeds[0],

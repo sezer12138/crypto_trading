@@ -66,3 +66,19 @@ def log_model(writer: Optional["SummaryWriter"], model: TCNPolicy, epoch: int) -
         for name, parameter in model.named_parameters():
             if name.startswith(("quantile_head", "policy_head")):
                 writer.add_histogram(f"model/{name}", parameter.detach(), epoch)
+
+
+def gradient_norms(model: TCNPolicy) -> dict[str, float]:
+    """Measure unclipped encoder/head norms, including absent-gradient zeros."""
+    squares = {key: None for key in ("encoder", "quantile_head", "policy_head")}
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            group = next(
+                (key for key in ("quantile_head", "policy_head") if name.startswith(key)), "encoder"
+            )
+            if parameter.grad is not None:
+                value = parameter.grad.detach().square().sum()
+                squares[group] = value if squares[group] is None else squares[group] + value
+    return {
+        key: float(value.sqrt()) if value is not None else 0.0 for key, value in squares.items()
+    }

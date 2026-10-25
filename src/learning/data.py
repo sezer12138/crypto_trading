@@ -26,14 +26,22 @@ class PreparedData:
     volatility: np.ndarray
 
 
-def validate_candles(frame: pd.DataFrame) -> None:
+def validate_candles(frame: pd.DataFrame, allow_gaps: bool = False) -> None:
     """Require complete sorted hourly OHLCV with physically valid candles."""
     columns = ["open", "high", "low", "close", "volume"]
     if not isinstance(frame.index, pd.DatetimeIndex) or not set(columns) <= set(frame):
         raise ValueError("Hourly OHLCV with a DatetimeIndex is required")
     if len(frame) < 2 or frame.index.has_duplicates or frame.index.hasnans:
         raise ValueError("Nonempty unique timestamps are required")
-    if not (frame.index.to_series().diff().dropna() == pd.Timedelta(hours=1)).all():
+    differences = frame.index.to_series().diff().dropna()
+    if not (
+        (
+            (differences >= pd.Timedelta(hours=1))
+            & (differences % pd.Timedelta(hours=1) == pd.Timedelta(0))
+        ).all()
+        if allow_gaps
+        else (differences == pd.Timedelta(hours=1)).all()
+    ):
         raise ValueError("Expected continuous hourly candles without gaps")
     values = frame[columns].to_numpy(dtype=float)
     if not np.isfinite(values).all() or (values[:, :4] <= 0).any() or (values[:, 4] < 0).any():
@@ -89,12 +97,26 @@ def transform_features(features: pd.DataFrame, mean: np.ndarray, scale: np.ndarr
     return np.c_[normalized, missing.astype(float)].astype(np.float32)
 
 
-def prepare_data(frame: pd.DataFrame, config: LearningConfig) -> PreparedData:
+def prepare_data(
+    frame: pd.DataFrame,
+    config: LearningConfig,
+    split_indices: tuple[int, int] | None = None,
+    allow_training_gaps: bool = False,
+) -> PreparedData:
     """Fit training-only scaler and purge future labels from partition boundaries."""
-    validate_candles(frame)
+    validate_candles(frame, allow_gaps=allow_training_gaps)
     n = len(frame)
-    train_end = int(n * config.train_ratio)
-    validation_end = int(n * (config.train_ratio + config.validation_ratio))
+    if split_indices is None:
+        train_end = int(n * config.train_ratio)
+        validation_end = int(n * (config.train_ratio + config.validation_ratio))
+    else:
+        if (
+            len(split_indices) != 2
+            or any(not isinstance(i, (int, np.integer)) for i in split_indices)
+            or not 0 < split_indices[0] < split_indices[1] < n
+        ):
+            raise ValueError("Explicit split indices must be increasing integers inside the data")
+        train_end, validation_end = map(int, split_indices)
     warmup = 168 + config.lookback - 1
     horizon = max(config.horizons)
     if (
@@ -102,7 +124,24 @@ def prepare_data(frame: pd.DataFrame, config: LearningConfig) -> PreparedData:
         or min(validation_end - train_end, n - validation_end) <= horizon + 1
     ):
         raise ValueError("Insufficient data for warmup and purged chronological partitions")
-    raw = causal_features(frame)
+    boundaries = np.r_[
+        0,
+        np.flatnonzero(frame.index.to_series().diff().to_numpy() > np.timedelta64(1, "h")),
+        n,
+    ]
+    if allow_training_gaps and len(boundaries) > 2:
+        if np.any(boundaries[1:-1] > train_end - warmup):
+            raise ValueError(
+                "Gaps or insufficient warmup near validation/evaluation are not allowed"
+            )
+        raw = pd.concat(
+            [
+                causal_features(frame.iloc[left:right])
+                for left, right in zip(boundaries[:-1], boundaries[1:])
+            ]
+        )
+    else:
+        raw = causal_features(frame)
     mean = raw.iloc[168:train_end].mean().to_numpy()
     scale = raw.iloc[168:train_end].std().to_numpy()
     scale = np.where(np.isfinite(scale) & (scale > 1e-8), scale, 1.0)
@@ -111,6 +150,17 @@ def prepare_data(frame: pd.DataFrame, config: LearningConfig) -> PreparedData:
         [(frame.close.shift(-h) / frame.open.shift(-1) - 1).to_numpy() for h in config.horizons],
         axis=1,
     ).astype(np.float32)
+    # No target may span a genuine missing hour, even if a caller inspects unused rows.
+    for boundary in boundaries[1:-1]:
+        for column, horizon_bars in enumerate(config.horizons):
+            labels[max(0, boundary - horizon_bars) : boundary, column] = np.nan
+    train_parts = [
+        np.arange(left + warmup, min(right, train_end) - horizon)
+        for left, right in zip(boundaries[:-1], boundaries[1:])
+        if left + warmup < min(right, train_end) - horizon
+    ]
+    if not train_parts:
+        raise ValueError("Insufficient continuous training history after warmup and label purge")
     names = list(raw.columns)
     volatility = raw.volatility_24.fillna(0).to_numpy(dtype=np.float32)
     return PreparedData(
@@ -120,7 +170,7 @@ def prepare_data(frame: pd.DataFrame, config: LearningConfig) -> PreparedData:
         mean,
         scale,
         names + [f"{name}_missing" for name in names],
-        np.arange(warmup, train_end - horizon),
+        np.concatenate(train_parts),
         np.arange(train_end, validation_end - horizon),
         train_end,
         validation_end,

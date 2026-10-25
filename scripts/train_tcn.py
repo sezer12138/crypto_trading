@@ -18,6 +18,17 @@ def main() -> None:
     parser.add_argument("--pretrain-epochs", type=int, default=6)
     parser.add_argument("--policy-epochs", type=int, default=4)
     parser.add_argument("--hidden", type=int, default=32)
+    parser.add_argument("--pretrain-stride", type=int, default=12)
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--early-stopping-patience", type=int, default=0)
+    parser.add_argument("--lr-patience", type=int, default=0)
+    parser.add_argument("--lr-factor", type=float, default=0.5)
+    parser.add_argument("--min-lr", type=float, default=1e-6)
+    parser.add_argument("--restore-best-pretrain", action="store_true")
+    parser.add_argument("--min-pretrain-epochs", type=int, default=0)
+    parser.add_argument("--min-policy-epochs", type=int, default=0)
+    parser.add_argument("--cpu-threads", type=int, default=4)
+    parser.add_argument("--pretrain-device", choices=["cpu", "mps"], default="cpu")
     parser.add_argument(
         "--no-tensorboard", action="store_true", help="Disable TensorBoard event logging"
     )
@@ -34,6 +45,17 @@ def main() -> None:
         pretrain_epochs=args.pretrain_epochs,
         policy_epochs=args.policy_epochs,
         hidden=args.hidden,
+        pretrain_stride=args.pretrain_stride,
+        batch_size=args.batch_size,
+        early_stopping_patience=args.early_stopping_patience,
+        lr_patience=args.lr_patience,
+        lr_factor=args.lr_factor,
+        min_lr=args.min_lr,
+        restore_best_pretrain=args.restore_best_pretrain,
+        min_pretrain_epochs=args.min_pretrain_epochs,
+        min_policy_epochs=args.min_policy_epochs,
+        cpu_threads=args.cpu_threads,
+        pretrain_device=args.pretrain_device,
     )
     report = run_experiment(
         args.data, args.output, config, args.seeds, tensorboard=not args.no_tensorboard
